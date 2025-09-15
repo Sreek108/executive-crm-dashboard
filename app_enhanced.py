@@ -1143,185 +1143,164 @@ def create_enhanced_agent_dashboard(agent_perf_df, schedule_df):
             """, unsafe_allow_html=True)
 
 def create_enhanced_conversion_dashboard(leads_df):
-    """Enhanced Conversion Dashboard with revenue attribution"""
+    """Enhanced Conversion Dashboard with revenue attribution (safe to missing cols)"""
     st.subheader("💼 Advanced Conversion & Revenue Intelligence")
-    
-    # Conversion Metrics Overview
-    col1, col2, col3, col4 = st.columns(4)
-    
+
+    # Conversion Metrics Overview (safe gets)
     total_leads = len(leads_df)
-    converted_leads = len(leads_df[leads_df.get('LeadStageId', pd.Series([0])) == 4])
-    total_pipeline = leads_df.get('RevenuePotential', pd.Series([0])).sum()
-    expected_revenue = leads_df.get('ExpectedRevenue', pd.Series([0])).sum()
-    
-    with col1:
-        conversion_rate = (converted_leads / total_leads * 100) if total_leads > 0 else 0
-        st.markdown(create_metric_card("Conversion Rate", conversion_rate, 8.5, "percentage"), unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown(create_metric_card("Pipeline Value", total_pipeline, 15.2, "currency"), unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown(create_metric_card("Expected Revenue", expected_revenue, 12.8, "currency"), unsafe_allow_html=True)
-    
-    with col4:
-        conversion_efficiency = (expected_revenue / total_pipeline * 100) if total_pipeline > 0 else 0
-        st.markdown(create_metric_card("Pipeline Efficiency", conversion_efficiency, 5.3, "percentage"), unsafe_allow_html=True)
-    
+    converted_leads = int((leads_df.get('LeadStageId', pd.Series(*len(leads_df))) == 4).sum())
+    total_pipeline = float(leads_df.get('RevenuePotential', pd.Series(*len(leads_df))).sum())
+    expected_revenue = float(leads_df.get('ExpectedRevenue', pd.Series(*len(leads_df))).sum())
+
+    with st.container():
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            conversion_rate = (converted_leads / total_leads * 100) if total_leads > 0 else 0.0
+            st.markdown(create_metric_card("Conversion Rate", conversion_rate, 8.5, "percentage"), unsafe_allow_html=True)
+        with col2:
+            st.markdown(create_metric_card("Pipeline Value", total_pipeline, 15.2, "currency"), unsafe_allow_html=True)
+        with col3:
+            st.markdown(create_metric_card("Expected Revenue", expected_revenue, 12.8, "currency"), unsafe_allow_html=True)
+        with col4:
+            conversion_efficiency = (expected_revenue / total_pipeline * 100) if total_pipeline > 0 else 0.0
+            st.markdown(create_metric_card("Pipeline Efficiency", conversion_efficiency, 5.3, "percentage"), unsafe_allow_html=True)
+
     # Revenue Analysis by Segments
     st.subheader("💰 Revenue Attribution Analysis")
-    
     col1, col2 = st.columns(2)
-    
+
     with col1:
-        # Revenue by Country
+        # Revenue by Country (SAFE): build agg dict only for existing columns
         if 'Country' in leads_df.columns:
-            country_revenue = leads_df.groupby('Country').agg({
-                'RevenuePotential': 'sum',
-                'ExpectedRevenue': 'sum',
-                'ConversionProbability': 'mean'
-            }).round(2)
-            
-            fig_country_revenue = go.Figure()
-            fig_country_revenue.add_trace(go.Bar(
-                name='Pipeline Value',
-                x=country_revenue.index,
-                y=country_revenue['RevenuePotential'],
-                marker_color='#3b82f6',
-                opacity=0.8
-            ))
-            fig_country_revenue.add_trace(go.Bar(
-                name='Expected Revenue',
-                x=country_revenue.index,
-                y=country_revenue['ExpectedRevenue'],
-                marker_color='#10b981',
-                opacity=0.9
-            ))
-            fig_country_revenue.update_layout(
-                title="Revenue Attribution by Country",
-                xaxis_title="Country",
-                yaxis_title="Revenue ($)",
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white'),
-                barmode='group'
-            )
-            st.plotly_chart(fig_country_revenue, use_container_width=True)
-    
-    with col2:
-        # Revenue by Lead Scoring
-        if 'LeadScoringId' in leads_df.columns:
-            scoring_mapping = {1: 'HOT', 2: 'WARM', 3: 'COLD', 4: 'DEAD'}
-            leads_df_temp = leads_df.copy()
-            leads_df_temp['ScoringLabel'] = leads_df_temp['LeadScoringId'].map(scoring_mapping)
-            
-            scoring_revenue = leads_df_temp.groupby('ScoringLabel')['ExpectedRevenue'].sum()
-            
-            fig_scoring_revenue = go.Figure(data=[go.Pie(
-                labels=scoring_revenue.index,
-                values=scoring_revenue.values,
-                hole=0.4,
-                marker_colors=['#dc2626', '#f59e0b', '#3b82f6', '#6b7280']
-            )])
-            fig_scoring_revenue.update_layout(
-                title="Expected Revenue by Lead Temperature",
-                paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white')
-            )
-            st.plotly_chart(fig_scoring_revenue, use_container_width=True)
-    
-    # Conversion Probability Analysis
-    st.subheader("🎯 Conversion Probability Intelligence")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if 'ConversionProbability' in leads_df.columns and 'RevenuePotential' in leads_df.columns:
-            # Scatter plot of Revenue vs Conversion Probability
-            fig_scatter = go.Figure()
-            
-            # Color by lead scoring
-            if 'LeadScoringId' in leads_df.columns:
-                scoring_colors = {1: '#dc2626', 2: '#f59e0b', 3: '#3b82f6', 4: '#6b7280'}
-                for score_id in leads_df['LeadScoringId'].unique():
-                    score_data = leads_df[leads_df['LeadScoringId'] == score_id]
-                    score_label = {1: 'HOT', 2: 'WARM', 3: 'COLD', 4: 'DEAD'}[score_id]
-                    
-                    fig_scatter.add_trace(go.Scatter(
-                        x=score_data['ConversionProbability'],
-                        y=score_data['RevenuePotential'],
-                        mode='markers',
-                        name=score_label,
-                        marker=dict(
-                            size=10,
-                            color=scoring_colors[score_id],
-                            opacity=0.7
-                        )
+            agg_dict = {}
+            if 'RevenuePotential' in leads_df.columns:
+                agg_dict['RevenuePotential'] = 'sum'
+            if 'ExpectedRevenue' in leads_df.columns:
+                agg_dict['ExpectedRevenue'] = 'sum'
+            if 'ConversionProbability' in leads_df.columns:
+                agg_dict['ConversionProbability'] = 'mean'
+
+            if len(agg_dict) > 0:
+                country_revenue = leads_df.groupby('Country').agg(agg_dict).round(2)
+                fig_country_revenue = go.Figure()
+                if 'RevenuePotential' in country_revenue.columns:
+                    fig_country_revenue.add_trace(go.Bar(
+                        name='Pipeline Value',
+                        x=country_revenue.index,
+                        y=country_revenue['RevenuePotential'],
+                        marker_color='#3b82f6',
+                        opacity=0.85
                     ))
-            
+                if 'ExpectedRevenue' in country_revenue.columns:
+                    fig_country_revenue.add_trace(go.Bar(
+                        name='Expected Revenue',
+                        x=country_revenue.index,
+                        y=country_revenue['ExpectedRevenue'],
+                        marker_color='#10b981',
+                        opacity=0.9
+                    ))
+                fig_country_revenue.update_layout(
+                    title="Revenue Attribution by Country",
+                    xaxis_title="Country",
+                    yaxis_title="Amount ($)",
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='white'),
+                    barmode='group'
+                )
+                st.plotly_chart(fig_country_revenue, use_container_width=True)
+            else:
+                st.info("Revenue/Conversion columns not found to build country attribution.")
+        else:
+            st.info("Country column not found; skipping market attribution.")
+
+    with col2:
+        # Revenue by Lead Scoring (SAFE): choose available value column
+        if 'LeadScoringId' in leads_df.columns:
+            value_col = 'ExpectedRevenue' if 'ExpectedRevenue' in leads_df.columns else ('RevenuePotential' if 'RevenuePotential' in leads_df.columns else None)
+            if value_col is not None:
+                scoring_mapping = {1:'HOT', 2:'WARM', 3:'COLD', 4:'DEAD'}
+                leads_df_temp = leads_df.copy()
+                leads_df_temp['ScoringLabel'] = leads_df_temp['LeadScoringId'].map(scoring_mapping)
+                scoring_revenue = leads_df_temp.groupby('ScoringLabel')[value_col].sum()
+                fig_scoring_revenue = go.Figure(data=[go.Pie(
+                    labels=scoring_revenue.index,
+                    values=scoring_revenue.values,
+                    hole=0.4,
+                    marker_colors=['#dc2626', '#f59e0b', '#3b82f6', '#6b7280']
+                )])
+                fig_scoring_revenue.update_layout(
+                    title=f"{value_col} by Lead Temperature",
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='white')
+                )
+                st.plotly_chart(fig_scoring_revenue, use_container_width=True)
+            else:
+                st.info("Neither ExpectedRevenue nor RevenuePotential is available for scoring breakdown.")
+
+    # Conversion Probability Intelligence (existing safety checks)
+    st.subheader("🎯 Conversion Probability Intelligence")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if {'ConversionProbability','RevenuePotential'}.issubset(leads_df.columns):
+            fig_scatter = go.Figure()
+            if 'LeadScoringId' in leads_df.columns:
+                scoring_colors = {1:'#dc2626', 2:'#f59e0b', 3:'#3b82f6', 4:'#6b7280'}
+                for score_id, grp in leads_df.groupby('LeadScoringId'):
+                    score_label = {1:'HOT',2:'WARM',3:'COLD',4:'DEAD'}.get(score_id, str(score_id))
+                    fig_scatter.add_trace(go.Scatter(
+                        x=grp['ConversionProbability'],
+                        y=grp['RevenuePotential'],
+                        mode='markers', name=score_label,
+                        marker=dict(size=10, color=scoring_colors.get(score_id,'#999'), opacity=0.7)
+                    ))
+            else:
+                fig_scatter.add_trace(go.Scatter(
+                    x=leads_df['ConversionProbability'], y=leads_df['RevenuePotential'],
+                    mode='markers', name='Leads', marker=dict(size=9, color='#3b82f6')
+                ))
             fig_scatter.update_layout(
                 title="Revenue Potential vs Conversion Probability",
                 xaxis_title="Conversion Probability",
                 yaxis_title="Revenue Potential ($)",
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white')
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='white')
             )
             st.plotly_chart(fig_scatter, use_container_width=True)
-    
+
     with col2:
-        # Conversion probability distribution
         if 'ConversionProbability' in leads_df.columns:
-            fig_prob_dist = go.Figure()
-            fig_prob_dist.add_trace(go.Histogram(
-                x=leads_df['ConversionProbability'],
-                nbinsx=20,
-                marker_color='#8b5cf6',
-                opacity=0.8
-            ))
-            fig_prob_dist.update_layout(
+            fig_prob = go.Figure(go.Histogram(x=leads_df['ConversionProbability'], nbinsx=20, marker_color='#8b5cf6', opacity=0.8))
+            fig_prob.update_layout(
                 title="Conversion Probability Distribution",
                 xaxis_title="Conversion Probability",
                 yaxis_title="Number of Leads",
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white')
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='white')
             )
-            st.plotly_chart(fig_prob_dist, use_container_width=True)
-    
-    # High-Value Opportunities
+            st.plotly_chart(fig_prob, use_container_width=True)
+
+    # High-Value Opportunities (unchanged)
     st.subheader("💎 High-Value Conversion Opportunities")
-    
-    if all(col in leads_df.columns for col in ['ExpectedRevenue', 'ConversionProbability', 'FullName']):
-        top_opportunities = leads_df.nlargest(10, 'ExpectedRevenue')
-        
-        # Create opportunity cards
-        for i, (_, lead) in enumerate(top_opportunities.iterrows()):
-            if i % 2 == 0:
-                col1, col2 = st.columns(2)
-                current_col = col1
-            else:
-                current_col = col2
-            
-            with current_col:
-                probability_color = "#10b981" if lead['ConversionProbability'] > 0.7 else "#f59e0b" if lead['ConversionProbability'] > 0.4 else "#ef4444"
+    if all(col in leads_df.columns for col in ['ExpectedRevenue','ConversionProbability','FullName']):
+        top_opps = leads_df.nlargest(10, 'ExpectedRevenue')
+        for i, (_, lead) in enumerate(top_opps.iterrows()):
+            col = st.columns(2)[i % 2]
+            with col:
+                probability_color = "#10b981" if lead['ConversionProbability'] > 0.7 else ("#f59e0b" if lead['ConversionProbability'] > 0.4 else "#ef4444")
                 st.markdown(f"""
                 <div class="performance-card">
-                    <h4>{lead.get('FullName', 'Unknown Lead')}</h4>
+                    <h4>{lead.get('FullName','Unknown Lead')}</h4>
                     <p><strong>Expected Revenue:</strong> ${lead.get('ExpectedRevenue', 0):,.0f}</p>
-                    <p><strong>Probability:</strong> <span style="color: {probability_color};">{lead.get('ConversionProbability', 0):.1%}</span></p>
-                    <p><strong>Company:</strong> {lead.get('Company', 'Unknown')[:30]}...</p>
+                    <p><strong>Probability:</strong> <span style="color:{probability_color};">{lead.get('ConversionProbability',0):.1%}</span></p>
+                    <p><strong>Company:</strong> {lead.get('Company','Unknown')[:30]}...</p>
                 </div>
                 """, unsafe_allow_html=True)
-    
-    # Revenue Forecasting
+
+    # Revenue Forecasting cards (unchanged)
     st.subheader("📈 AI Revenue Forecasting")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        # 30-day forecast
-        forecast_30d = expected_revenue * 0.35  # Assuming 35% of expected revenue in 30 days
+    c1,c2,c3 = st.columns(3)
+    with c1:
+        forecast_30d = expected_revenue * 0.35
         st.markdown(f"""
         <div class="prediction-box">
             <h4>📅 30-Day Forecast</h4>
@@ -1330,10 +1309,8 @@ def create_enhanced_conversion_dashboard(leads_df):
             <small>Based on current conversion rates</small>
         </div>
         """, unsafe_allow_html=True)
-    
-    with col2:
-        # 90-day forecast
-        forecast_90d = expected_revenue * 0.65  # Assuming 65% of expected revenue in 90 days
+    with c2:
+        forecast_90d = expected_revenue * 0.65
         st.markdown(f"""
         <div class="prediction-box">
             <h4>📅 90-Day Forecast</h4>
@@ -1342,10 +1319,8 @@ def create_enhanced_conversion_dashboard(leads_df):
             <small>Including nurturing pipeline</small>
         </div>
         """, unsafe_allow_html=True)
-    
-    with col3:
-        # Year-end projection
-        yearly_projection = expected_revenue * 1.2  # Assuming growth
+    with c3:
+        yearly_projection = expected_revenue * 1.2
         st.markdown(f"""
         <div class="prediction-box">
             <h4>📅 Year-End Projection</h4>
