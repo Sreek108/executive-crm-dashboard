@@ -758,8 +758,8 @@ def create_enhanced_task_dashboard(schedule_df):
     col1, col2, col3, col4 = st.columns(4)
     
     total_tasks = len(schedule_df)
-    overdue_tasks = schedule_df.get('IsOverdue', pd.Series([False])).sum()
-    high_priority = len(schedule_df[schedule_df.get('Priority', pd.Series(['Medium'])) == 'High'])
+    overdue_tasks = schedule_df.get('IsOverdue', pd.Series([False] * len(schedule_df))).sum()
+    high_priority = len(schedule_df[schedule_df.get('Priority', pd.Series(['Medium'] * len(schedule_df))) == 'High'])
     
     with col1:
         st.markdown(create_metric_card("Total Tasks", total_tasks, 15.3), unsafe_allow_html=True)
@@ -767,7 +767,7 @@ def create_enhanced_task_dashboard(schedule_df):
     with col2:
         st.markdown(create_metric_card("Overdue Tasks", overdue_tasks, -12.5), unsafe_allow_html=True)
         if overdue_tasks > 0:
-            st.markdown(f'<small style="color: #fc8181;">Immediate attention needed</small>', unsafe_allow_html=True)
+            st.markdown('<small style="color: #fc8181;">Immediate attention needed</small>', unsafe_allow_html=True)
     
     with col3:
         st.markdown(create_metric_card("High Priority", high_priority, 8.2), unsafe_allow_html=True)
@@ -883,7 +883,7 @@ def create_enhanced_task_dashboard(schedule_df):
             """, unsafe_allow_html=True)
     
     with col2:
-        if 'ActualEffortHours' in schedule_df.columns and 'EstimatedEffortHours' in schedule_df.columns:
+        if 'ActualEffortHours' in schedule_df.columns and 'EstimatedEffortHours' in schedule_df.columns and 'TaskStatus' in schedule_df.columns:
             completed_tasks = schedule_df[schedule_df['TaskStatus'] == 'Completed']
             if len(completed_tasks) > 0:
                 actual_effort = completed_tasks['ActualEffortHours'].mean()
@@ -899,15 +899,13 @@ def create_enhanced_task_dashboard(schedule_df):
                 """, unsafe_allow_html=True)
     
     with col3:
-        days_to_due = (
-             schedule_df['DaysUntilDue']
-             if 'DaysUntilDue' in schedule_df.columns
-             else (pd.to_datetime(schedule_df.get('ScheduledDate'), errors='coerce') - pd.Timestamp.now()).dt.days
-)
-
-# Filter safely for tasks due in next 7 days
+        # SAFE, length-aligned computation of upcoming_week
+        if 'DaysUntilDue' in schedule_df.columns:
+            days_to_due = pd.to_numeric(schedule_df['DaysUntilDue'], errors='coerce')
+        else:
+            sched = pd.to_datetime(schedule_df.get('ScheduledDate'), errors='coerce')
+            days_to_due = (sched - pd.Timestamp.now()).dt.days
         upcoming_week = schedule_df[days_to_due.between(0, 7, inclusive='both')]
-
         st.markdown(f"""
         <div class="performance-card">
             <h4>📅 Upcoming Week</h4>
