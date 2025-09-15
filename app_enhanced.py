@@ -899,7 +899,15 @@ def create_enhanced_task_dashboard(schedule_df):
                 """, unsafe_allow_html=True)
     
     with col3:
-        upcoming_week = schedule_df[schedule_df.get('DaysUntilDue', pd.Series([999])).between(0, 7)]
+        days_to_due = (
+             schedule_df['DaysUntilDue']
+             if 'DaysUntilDue' in schedule_df.columns
+             else (pd.to_datetime(schedule_df.get('ScheduledDate'), errors='coerce') - pd.Timestamp.now()).dt.days
+)
+
+# Filter safely for tasks due in next 7 days
+        upcoming_week = schedule_df[days_to_due.between(0, 7, inclusive='both')]
+
         st.markdown(f"""
         <div class="performance-card">
             <h4>📅 Upcoming Week</h4>
