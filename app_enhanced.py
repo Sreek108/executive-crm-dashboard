@@ -758,23 +758,26 @@ def create_enhanced_task_dashboard(schedule_df):
     col1, col2, col3, col4 = st.columns(4)
     
     total_tasks = len(schedule_df)
-    overdue_tasks = schedule_df.get('IsOverdue', pd.Series([False] * len(schedule_df))).sum()
-    high_priority = len(schedule_df[schedule_df.get('Priority', pd.Series(['Medium'] * len(schedule_df))) == 'High'])
+    # Length-aligned defaults to avoid misaligned boolean masks
+    overdue_series_default = pd.Series([False] * len(schedule_df), index=schedule_df.index)
+    priority_series_default = pd.Series(['Medium'] * len(schedule_df), index=schedule_df.index)
+    overdue_tasks = schedule_df.get('IsOverdue', overdue_series_default).sum()
+    high_priority = (schedule_df.get('Priority', priority_series_default) == 'High').sum()
     
     with col1:
         st.markdown(create_metric_card("Total Tasks", total_tasks, 15.3), unsafe_allow_html=True)
     
     with col2:
-        st.markdown(create_metric_card("Overdue Tasks", overdue_tasks, -12.5), unsafe_allow_html=True)
-        if overdue_tasks > 0:
+        st.markdown(create_metric_card("Overdue Tasks", int(overdue_tasks), -12.5), unsafe_allow_html=True)
+        if int(overdue_tasks) > 0:
             st.markdown('<small style="color: #fc8181;">Immediate attention needed</small>', unsafe_allow_html=True)
     
     with col3:
-        st.markdown(create_metric_card("High Priority", high_priority, 8.2), unsafe_allow_html=True)
+        st.markdown(create_metric_card("High Priority", int(high_priority), 8.2), unsafe_allow_html=True)
     
     with col4:
         if 'CompletionProbability' in schedule_df.columns:
-            avg_completion_prob = schedule_df['CompletionProbability'].mean() * 100
+            avg_completion_prob = float(schedule_df['CompletionProbability'].mean() * 100)
             st.markdown(create_metric_card("Completion Rate", avg_completion_prob, 5.7, "percentage"), unsafe_allow_html=True)
     
     # SLA Compliance Dashboard
@@ -786,7 +789,6 @@ def create_enhanced_task_dashboard(schedule_df):
         with col1:
             sla_counts = schedule_df['SLAStatus'].value_counts()
             colors = {'On Track': '#10b981', 'At Risk': '#f59e0b', 'Breach': '#ef4444'}
-            
             fig_sla = go.Figure(data=[go.Pie(
                 labels=sla_counts.index,
                 values=sla_counts.values,
@@ -801,12 +803,9 @@ def create_enhanced_task_dashboard(schedule_df):
             st.plotly_chart(fig_sla, use_container_width=True)
         
         with col2:
-            # SLA breach details
             breach_tasks = schedule_df[schedule_df['SLAStatus'] == 'Breach']
             at_risk_tasks = schedule_df[schedule_df['SLAStatus'] == 'At Risk']
-            
             st.markdown("**🚨 SLA Alert Summary:**")
-            
             if len(breach_tasks) > 0:
                 st.markdown(f"""
                 <div class="insight-card alert-high">
@@ -814,7 +813,6 @@ def create_enhanced_task_dashboard(schedule_df):
                     Tasks past due date requiring immediate escalation
                 </div>
                 """, unsafe_allow_html=True)
-            
             if len(at_risk_tasks) > 0:
                 st.markdown(f"""
                 <div class="insight-card alert-medium">
@@ -831,7 +829,6 @@ def create_enhanced_task_dashboard(schedule_df):
     with col1:
         if 'Priority' in schedule_df.columns:
             priority_counts = schedule_df['Priority'].value_counts()
-            
             fig_priority = go.Figure(data=[go.Bar(
                 x=priority_counts.index,
                 y=priority_counts.values,
@@ -850,7 +847,6 @@ def create_enhanced_task_dashboard(schedule_df):
     with col2:
         if 'TaskType' in schedule_df.columns:
             task_type_counts = schedule_df['TaskType'].value_counts()
-            
             fig_types = go.Figure(data=[go.Bar(
                 y=task_type_counts.index,
                 x=task_type_counts.values,
@@ -873,7 +869,7 @@ def create_enhanced_task_dashboard(schedule_df):
     
     with col1:
         if 'EstimatedEffortHours' in schedule_df.columns:
-            total_effort = schedule_df['EstimatedEffortHours'].sum()
+            total_effort = float(schedule_df['EstimatedEffortHours'].sum())
             st.markdown(f"""
             <div class="performance-card">
                 <h4>⏱️ Total Effort Required</h4>
@@ -883,13 +879,12 @@ def create_enhanced_task_dashboard(schedule_df):
             """, unsafe_allow_html=True)
     
     with col2:
-        if 'ActualEffortHours' in schedule_df.columns and 'EstimatedEffortHours' in schedule_df.columns and 'TaskStatus' in schedule_df.columns:
+        if {'ActualEffortHours','EstimatedEffortHours','TaskStatus'}.issubset(schedule_df.columns):
             completed_tasks = schedule_df[schedule_df['TaskStatus'] == 'Completed']
             if len(completed_tasks) > 0:
-                actual_effort = completed_tasks['ActualEffortHours'].mean()
-                estimated_effort = completed_tasks['EstimatedEffortHours'].mean()
+                actual_effort = float(completed_tasks['ActualEffortHours'].mean())
+                estimated_effort = float(completed_tasks['EstimatedEffortHours'].mean())
                 efficiency = (estimated_effort / actual_effort) * 100 if actual_effort > 0 else 100
-                
                 st.markdown(f"""
                 <div class="performance-card">
                     <h4>📊 Task Efficiency</h4>
@@ -903,7 +898,11 @@ def create_enhanced_task_dashboard(schedule_df):
         if 'DaysUntilDue' in schedule_df.columns:
             days_to_due = pd.to_numeric(schedule_df['DaysUntilDue'], errors='coerce')
         else:
-            sched = pd.to_datetime(schedule_df.get('ScheduledDate'), errors='coerce')
+            if 'ScheduledDate' in schedule_df.columns:
+                sched = pd.to_datetime(schedule_df['ScheduledDate'], errors='coerce')
+            else:
+                # If column missing, create a NaT Series aligned to df index
+                sched = pd.Series(pd.NaT, index=schedule_df.index)
             days_to_due = (sched - pd.Timestamp.now()).dt.days
         upcoming_week = schedule_df[days_to_due.between(0, 7, inclusive='both')]
         st.markdown(f"""
@@ -940,6 +939,7 @@ def create_enhanced_task_dashboard(schedule_df):
             <p><strong>Recommendation:</strong> Add 2 hours buffer time</p>
         </div>
         """, unsafe_allow_html=True)
+
 
 def create_enhanced_agent_dashboard(agent_perf_df, schedule_df):
     """Enhanced Agent Performance Dashboard with detailed analytics"""
