@@ -362,7 +362,7 @@ def create_enhanced_executive_summary(leads_df, calls_df, schedule_df, agent_per
 
 def create_enhanced_lead_status_dashboard(leads_df):
     """Enhanced Lead Status Dashboard with advanced segmentation and always-on insights (robust to missing columns)."""
-    st.subheader("📊 Lead Analytics")
+    st.subheader("📊Lead Analytics")
 
     # --- Lead Stage Funnel & Segmentation ---
     col1, col2 = st.columns(2)
@@ -533,6 +533,99 @@ def create_enhanced_lead_status_dashboard(leads_df):
     st.markdown(f"- 🧊 {cooling} cooling leads require retention play; trigger nurturing workflow.")
     st.markdown(f"- 🏆 {champions} champions segment shows strong upsell potential this month.")
 
+    # ===== 🎯 AI Propensity Models =====
+    st.markdown("### 🎯 AI Propensity Models")
+    # Derive propensities if columns are missing
+    eng_norm = (eng.fillna(0) / 100).clip(0, 1)
+    rev_norm = (rev / (rev.max() if rev.max() > 0 else 1)).clip(0, 1)
+
+    buy = pd.to_numeric(leads_df.get('PropensityToBuy', np.nan), errors='coerce')
+    churn = pd.to_numeric(leads_df.get('PropensityToChurn', np.nan), errors='coerce')
+    upgrade = pd.to_numeric(leads_df.get('PropensityToUpgrade', np.nan), errors='coerce')
+
+    # Fallback formulas
+    buy = buy.fillna((0.55*conv.fillna(0) + 0.35*eng_norm + 0.10*rev_norm).clip(0,1))
+    cooling_flag = (leads_df.get('TemperatureTrend', pd.Series(['Unknown']*len(idx), index=idx)) == 'Cooling Down').astype(int)
+    churn = churn.fillna((0.65*(1-conv.fillna(0)) + 0.25*(1-eng_norm) + 0.10*cooling_flag).clip(0,1))
+    upgrade = upgrade.fillna((0.50*eng_norm + 0.30*conv.fillna(0) + 0.20*rev_norm).clip(0,1))
+
+    # Gauges row
+    g1,g2,g3 = st.columns(3)
+    with g1:
+        fig = go.Figure(go.Indicator(mode="gauge+number", value=float(buy.mean()*100),
+                                     title={'text': "Avg Buy Propensity"},
+                                     gauge={'axis': {'range':[0,100]}, 'bar': {'color':'#10b981'}}))
+        fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+        st.plotly_chart(fig, use_container_width=True)
+    with g2:
+        fig = go.Figure(go.Indicator(mode="gauge+number", value=float(churn.mean()*100),
+                                     title={'text': "Avg Churn Risk"},
+                                     gauge={'axis': {'range':[0,100]}, 'bar': {'color':'#ef4444'}}))
+        fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+        st.plotly_chart(fig, use_container_width=True)
+    with g3:
+        fig = go.Figure(go.Indicator(mode="gauge+number", value=float(upgrade.mean()*100),
+                                     title={'text': "Avg Upgrade Potential"},
+                                     gauge={'axis': {'range':[0,100]}, 'bar': {'color':'#8b5cf6'}}))
+        fig.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Distribution bars
+    dist = pd.DataFrame({
+        'Metric': ['Buy','Churn','Upgrade'],
+        'Avg%': [float(buy.mean()*100), float(churn.mean()*100), float(upgrade.mean()*100)]
+    })
+    fig = go.Figure(go.Bar(x=dist['Metric'], y=dist['Avg%'], marker_color=['#10b981','#ef4444','#8b5cf6']))
+    fig.update_layout(title="Propensity Averages", yaxis_title="Percent", paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ===== 🎯 AI-Recommended Next Best Actions =====
+    st.markdown("### 🎯 AI-Recommended Next Best Actions")
+
+    # Build aligned defaults for names
+    name_series = leads_df.get('FullName', pd.Series([f'Lead {i+1}' for i in range(len(idx))], index=idx))
+    company_series = leads_df.get('Company', pd.Series(['-']*len(idx), index=idx))
+    country_series = leads_df.get('Country', pd.Series(['-']*len(idx), index=idx))
+
+    # Simple rule engine
+    def decide_action(b, c, u, e, r):
+        # Scores
+        buy_s = b
+        churn_s = c
+        upg_s = u
+        # Decision
+        if churn_s >= 0.70 and r > 0:
+            return ("Retention Call in 24h", "High", float(0.70 + 0.30*min(1.0, r/(r.mean()+1e-9))), "High churn risk on valuable lead")
+        if buy_s >= 0.75 and e >= 0.60:
+            return ("Schedule Demo in 48h", "High", float(0.70 + 0.30*buy_s), "Strong buy intent and engagement")
+        if upg_s >= 0.70 and e >= 0.50:
+            return ("Upsell Offer", "Medium", float(0.60 + 0.40*upg_s), "Upgrade potential detected")
+        if buy_s >= 0.55:
+            return ("Nurture Sequence", "Medium", float(0.50 + 0.50*buy_s), "Moderate buy intent—nurture recommended")
+        return ("Check-in Email", "Low", 0.50, "Low intent—light touch")
+
+    actions = []
+    for i in range(len(idx)):
+        b, c, u = float(buy.iloc[i]), float(churn.iloc[i]), float(upgrade.iloc[i])
+        e = float(eng_norm.iloc[i] if not np.isnan(eng_norm.iloc[i]) else 0.0)
+        r_i = float(rev.iloc[i])
+        act, prio, conf, reason = decide_action(b, c, u, e, r_i)
+        actions.append((name_series.iloc[i], company_series.iloc[i], country_series.iloc[i], act, prio, conf, r_i, b, c, u))
+
+    act_df = pd.DataFrame(actions, columns=['Lead','Company','Country','Action','Priority','Confidence','Revenue','Buy','Churn','Upgrade'])
+    # Summary chart
+    summary = act_df['Action'].value_counts()
+    fig = go.Figure(go.Bar(y=summary.index, x=summary.values, orientation='h', marker_color='#f59e0b'))
+    fig.update_layout(title="Recommended Actions Summary", xaxis_title="Number of Leads", paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Ranked queue: High first, then Medium, then Low, sorted by Confidence and Revenue
+    prio_order = pd.Categorical(act_df['Priority'], categories=['High','Medium','Low'], ordered=True)
+    act_df = act_df.assign(PriorityOrder=prio_order).sort_values(['PriorityOrder','Confidence','Revenue'], ascending=[True, False, False]).drop(columns=['PriorityOrder'])
+    st.dataframe(
+        act_df.head(15).style.format({'Confidence':'{:.0%}','Revenue':'${:,.0f}','Buy':'{:.0%}','Churn':'{:.0%}','Upgrade':'{:.0%}'}),
+        use_container_width=True, height=420
+    )
 
 def create_enhanced_call_activity_dashboard(calls_df):
     """Enhanced AI Call Activity Dashboard with pattern analysis"""
