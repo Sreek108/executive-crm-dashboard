@@ -484,12 +484,13 @@ def create_enhanced_lead_status_dashboard(leads_df):
 
     # Length-aligned, numeric-safe series
     idx = leads_df.index
-    eng = pd.to_numeric(leads_df.get('EngagementScore', pd.Series([np.nan]*len(idx), index=idx)), errors='coerce')
-    conv = pd.to_numeric(leads_df.get('ConversionProbability', pd.Series([np.nan]*len(idx), index=idx)), errors='coerce')
-    rev  = pd.to_numeric(
-        leads_df.get('ExpectedRevenue', leads_df.get('RevenuePotential', pd.Series(*len(idx), index=idx))),
-        errors='coerce'
-    ).fillna(0)
+eng = pd.to_numeric(leads_df.get('EngagementScore', pd.Series([np.nan]*len(idx), index=idx)), errors='coerce')
+conv = pd.to_numeric(leads_df.get('ConversionProbability', pd.Series([np.nan]*len(idx), index=idx)), errors='coerce')
+rev = pd.to_numeric(
+    leads_df.get('ExpectedRevenue', leads_df.get('RevenuePotential', pd.Series(*len(idx), index=idx))),
+    errors='coerce'
+).fillna(0)
+
 
     # KPI strip
     k1,k2,k3,k4 = st.columns(4)
