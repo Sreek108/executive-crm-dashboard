@@ -12,8 +12,7 @@ from datetime import datetime
 # Page config
 # ------------------------------------------------------------
 st.set_page_config(
-    page_title="Executive CRM Dashboard - Advanced Analytics",
-    page_icon="🚀",
+    page_title="CRM Dashboard,
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -211,33 +210,42 @@ def create_enhanced_executive_summary(leads_df, calls_df, schedule_df, agent_per
 
     col1, col2, col3, col4, col5 = st.columns(5)
 
+    # Col 1: Leads
     with col1:
         total_leads = len(leads_df)
-        hot_leads = int((leads_df.get("LeadScoringId", pd.Series(*len(leads_df), index=leads_df.index)) == 1).sum())
+        lead_scoring = pd.to_numeric(leads_df.get("LeadScoringId", aligned_series(leads_df, 0)), errors="coerce").fillna(0)
+        hot_leads = int((lead_scoring == 1).sum())
         st.markdown(create_metric_card("Total Leads", total_leads, 15.2), unsafe_allow_html=True)
         st.caption(f"🔥 {hot_leads} Hot Leads")
 
+    # Col 2: Pipeline/Expected
     with col2:
-        total_pipeline = float(pd.to_numeric(leads_df.get("RevenuePotential", pd.Series(*len(leads_df), index=leads_df.index)), errors="coerce").sum())
-        expected_revenue = float(pd.to_numeric(leads_df.get("ExpectedRevenue", pd.Series(*len(leads_df), index=leads_df.index)), errors="coerce").sum())
-        st.markdown(create_metric_card("Pipeline Value", total_pipeline, 8.7, "currency"), unsafe_allow_html=True)
-        st.caption(f"💰 ${expected_revenue:,.0f} Expected")
+        revenue_potential = pd.to_numeric(leads_df.get("RevenuePotential", aligned_series(leads_df, 0.0)), errors="coerce").fillna(0.0)
+        expected_revenue = pd.to_numeric(leads_df.get("ExpectedRevenue", leads_df.get("RevenuePotential", aligned_series(leads_df, 0.0))), errors="coerce").fillna(0.0)
+        st.markdown(create_metric_card("Pipeline Value", float(revenue_potential.sum()), 8.7, "currency"), unsafe_allow_html=True)
+        st.caption(f"💰 ${float(expected_revenue.sum()):,.0f} Expected")
 
+    # Col 3: Call success
     with col3:
-        success_rate = float(pd.to_numeric(calls_df.get("IsSuccessful", pd.Series(*len(calls_df), index=calls_df.index)), errors="coerce").mean() * 100) if len(calls_df) else 0.0
+        is_success = pd.to_numeric(calls_df.get("IsSuccessful", aligned_series(calls_df, 0)), errors="coerce").fillna(0.0)
+        success_rate = float(is_success.mean() * 100) if len(is_success) else 0.0
         st.markdown(create_metric_card("Call Success Rate", success_rate, -2.3, "percentage"), unsafe_allow_html=True)
         st.caption(f"📞 {len(calls_df)} Total Calls")
 
+    # Col 4: Engagement
     with col4:
-        avg_engagement = float(pd.to_numeric(leads_df.get("EngagementScore", pd.Series(*len(leads_df), index=leads_df.index)), errors="coerce").mean())
-        high_engagement = int((pd.to_numeric(leads_df.get("EngagementScore", pd.Series(*len(leads_df), index=leads_df.index)), errors="coerce") > 80).sum())
+        engagement = pd.to_numeric(leads_df.get("EngagementScore", aligned_series(leads_df, 0)), errors="coerce").fillna(0.0)
+        avg_engagement = float(engagement.mean())
+        high_engagement = int((engagement > 80).sum())
         st.markdown(create_metric_card("Avg Engagement", avg_engagement, 5.1), unsafe_allow_html=True)
         st.caption(f"⭐ {high_engagement} High Engagement")
 
+    # Col 5: Conversion
     with col5:
-        conv_mean = float(pd.to_numeric(leads_df.get("ConversionProbability", pd.Series(*len(leads_df), index=leads_df.index)), errors="coerce").mean() * 100)
-        predicted_conversions = int((pd.to_numeric(leads_df.get("ConversionProbability", pd.Series(*len(leads_df), index=leads_df.index)), errors="coerce") > 0.7).sum())
-        st.markdown(create_metric_card("Conversion Rate", conv_mean, 12.4, "percentage"), unsafe_allow_html=True)
+        conv = pd.to_numeric(leads_df.get("ConversionProbability", aligned_series(leads_df, 0.0)), errors="coerce").fillna(0.0)
+        conversion_rate = float(conv.mean() * 100)
+        predicted_conversions = int((conv > 0.7).sum())
+        st.markdown(create_metric_card("Conversion Rate", conversion_rate, 12.4, "percentage"), unsafe_allow_html=True)
         st.caption(f"🎯 {predicted_conversions} Likely Converts")
 
 # ------------------------------------------------------------
