@@ -1328,210 +1328,132 @@ def create_enhanced_conversion_dashboard(leads_df):
 
 
 def create_enhanced_geographic_dashboard(leads_df):
-    """Enhanced Geographic Dashboard with market intelligence"""
+    """Enhanced Geographic Dashboard with market intelligence (robust to missing columns)."""
     st.subheader("🌍 Global Market Intelligence Dashboard")
-    
+
+    # Guard: need a Country column to proceed
     if 'Country' not in leads_df.columns:
         st.warning("Geographic data not available.")
         return
+
+    # Build aggregation dictionary only from columns that exist
+    agg_map = {}
+    count_col = None
+    for candidate in ['LeadId', 'LeadID', 'LeadCode', 'FullName']:
+        if candidate in leads_df.columns:
+            count_col = candidate
+            break
+    if count_col:
+        agg_map[count_col] = 'count'
+
+    if 'RevenuePotential' in leads_df.columns:
+        agg_map['RevenuePotential'] = 'sum'
+    if 'ExpectedRevenue' in leads_df.columns:
+        agg_map['ExpectedRevenue'] = 'sum'
+    if 'ConversionProbability' in leads_df.columns:
+        agg_map['ConversionProbability'] = 'mean'
+    if 'EngagementScore' in leads_df.columns:
+        agg_map['EngagementScore'] = 'mean'
+
+    # Aggregate safely
+    grouped = leads_df.groupby('Country').agg(agg_map).round(2)
+
+    # Construct a normalized summary frame with consistent column names
+    geo = pd.DataFrame(index=grouped.index)
+
+    # Lead count
+    if count_col and count_col in grouped.columns:
+        geo['Lead_Count'] = grouped[count_col]
+    else:
+        geo['Lead_Count'] = leads_df.groupby('Country').size()
+
+    # Pipeline totals and averages
+    if 'RevenuePotential' in leads_df.columns:
+        geo['Total_Pipeline'] = grouped.get('RevenuePotential') if 'RevenuePotential' in grouped.columns else leads_df.groupby('Country')['RevenuePotential'].sum()
+        geo['Avg_Deal_Size'] = leads_df.groupby('Country')['RevenuePotential'].mean()
     
-    # Geographic Performance Metrics
-    geo_summary = leads_df.groupby('Country').agg({
-        'LeadId': 'count',
-        'RevenuePotential': ['sum', 'mean'],
-        'ConversionProbability': 'mean',
-        'ExpectedRevenue': 'sum',
-        'EngagementScore': 'mean'
-    }).round(2)
-    
-    geo_summary.columns = ['Lead_Count', 'Total_Pipeline', 'Avg_Deal_Size', 'Conversion_Rate', 'Expected_Revenue', 'Avg_Engagement']
-    geo_summary = geo_summary.reset_index()
-    
-    # Market Performance Overview
-    col1, col2, col3, col4 = st.columns(4)
-    
-    top_market = geo_summary.loc[geo_summary['Expected_Revenue'].idxmax(), 'Country']
-    top_revenue = geo_summary['Expected_Revenue'].max()
-    
-    with col1:
-        total_markets = len(geo_summary)
-        st.markdown(create_metric_card("Active Markets", total_markets), unsafe_allow_html=True)
-    
-    with col2:
+    # Conversion rate mean
+    if 'ConversionProbability' in leads_df.columns:
+        geo['Conversion_Rate'] = grouped.get('ConversionProbability', leads_df.groupby('Country')['ConversionProbability'].mean())
+
+    # Expected revenue
+    if 'ExpectedRevenue' in leads_df.columns:
+        geo['Expected_Revenue'] = grouped.get('ExpectedRevenue', leads_df.groupby('Country')['ExpectedRevenue'].sum())
+
+    # Avg engagement
+    if 'EngagementScore' in leads_df.columns:
+        geo['Avg_Engagement'] = grouped.get('EngagementScore', leads_df.groupby('Country')['EngagementScore'].mean())
+
+    geo = geo.fillna(0).round(2).reset_index()
+
+    # KPI row
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(create_metric_card("Active Markets", len(geo)), unsafe_allow_html=True)
+    with c2:
+        top_market = geo.loc[geo['Lead_Count'].idxmax(), 'Country'] if len(geo) > 0 else 'N/A'
+        top_expected = float(geo['Expected_Revenue'].max()) if 'Expected_Revenue' in geo.columns and len(geo) > 0 else 0.0
         st.markdown(create_metric_card("Top Market", f"{top_market}", None, "text"), unsafe_allow_html=True)
-        st.markdown(f'<small style="color: #68d391;">${top_revenue:,.0f} expected</small>', unsafe_allow_html=True)
-    
-    with col3:
-        avg_conversion = geo_summary['Conversion_Rate'].mean()
-        st.markdown(create_metric_card("Avg Conversion", avg_conversion, 6.2, "percentage"), unsafe_allow_html=True)
-    
-    with col4:
-        total_international = geo_summary['Expected_Revenue'].sum()
-        st.markdown(create_metric_card("Global Pipeline", total_international, 18.5, "currency"), unsafe_allow_html=True)
-    
-    # Geographic Analysis Charts
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Market size comparison
-        fig_market_size = go.Figure()
-        fig_market_size.add_trace(go.Bar(
-            x=geo_summary['Country'],
-            y=geo_summary['Lead_Count'],
-            name='Lead Count',
-            marker_color='#3b82f6'
-        ))
-        fig_market_size.update_layout(
-            title="Market Size by Lead Volume",
-            xaxis_title="Country",
-            yaxis_title="Number of Leads",
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white')
-        )
-        st.plotly_chart(fig_market_size, use_container_width=True)
-    
-    with col2:
-        # Revenue potential by market
-        fig_market_revenue = go.Figure()
-        fig_market_revenue.add_trace(go.Bar(
-            x=geo_summary['Country'],
-            y=geo_summary['Expected_Revenue'],
-            name='Expected Revenue',
-            marker_color='#10b981'
-        ))
-        fig_market_revenue.update_layout(
-            title="Revenue Potential by Market",
-            xaxis_title="Country",
-            yaxis_title="Expected Revenue ($)",
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white')
-        )
-        st.plotly_chart(fig_market_revenue, use_container_width=True)
-    
-    # Market Intelligence Matrix
+        st.caption(f"💰 ${top_expected:,.0f} expected")
+    with c3:
+        avg_conv = float(geo['Conversion_Rate'].mean()*100) if 'Conversion_Rate' in geo.columns else 0.0
+        st.markdown(create_metric_card("Avg Conversion", avg_conv, 6.2, "percentage"), unsafe_allow_html=True)
+    with c4:
+        global_pipeline = float(geo['Total_Pipeline'].sum()) if 'Total_Pipeline' in geo.columns else 0.0
+        st.markdown(create_metric_card("Global Pipeline", global_pipeline, 18.5, "currency"), unsafe_allow_html=True)
+
+    # Charts row 1
+    c1, c2 = st.columns(2)
+    with c1:
+        fig1 = go.Figure()
+        fig1.add_bar(x=geo['Country'], y=geo['Lead_Count'], name='Lead Count', marker_color='#3b82f6')
+        fig1.update_layout(title='Market Size by Lead Volume', xaxis_title='Country', yaxis_title='Number of Leads',
+                           paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+        st.plotly_chart(fig1, use_container_width=True)
+    with c2:
+        if 'Expected_Revenue' in geo.columns:
+            fig2 = go.Figure()
+            fig2.add_bar(x=geo['Country'], y=geo['Expected_Revenue'], name='Expected Revenue', marker_color='#10b981')
+            fig2.update_layout(title='Revenue Potential by Market', xaxis_title='Country', yaxis_title='Expected Revenue ($)',
+                               paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+            st.plotly_chart(fig2, use_container_width=True)
+        elif 'Total_Pipeline' in geo.columns:
+            fig2 = go.Figure()
+            fig2.add_bar(x=geo['Country'], y=geo['Total_Pipeline'], name='Pipeline Value', marker_color='#f59e0b')
+            fig2.update_layout(title='Pipeline Value by Market', xaxis_title='Country', yaxis_title='Pipeline ($)',
+                               paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+            st.plotly_chart(fig2, use_container_width=True)
+
+    # Charts row 2
     st.subheader("📊 Market Intelligence Matrix")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Conversion rate vs Deal size bubble chart
-        fig_bubble = go.Figure()
-        fig_bubble.add_trace(go.Scatter(
-            x=geo_summary['Conversion_Rate'],
-            y=geo_summary['Avg_Deal_Size'],
-            mode='markers+text',
-            text=geo_summary['Country'],
-            textposition='top center',
-            marker=dict(
-                size=geo_summary['Lead_Count'] * 3,  # Bubble size based on lead count
-                color=geo_summary['Expected_Revenue'],
-                colorscale='Viridis',
-                showscale=True,
-                colorbar=dict(title="Expected Revenue"),
-                sizemode='diameter',
-                sizeref=2,
-                opacity=0.8
-            )
-        ))
-        fig_bubble.update_layout(
-            title="Market Opportunity Matrix",
-            xaxis_title="Conversion Rate",
-            yaxis_title="Average Deal Size ($)",
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white')
-        )
-        st.plotly_chart(fig_bubble, use_container_width=True)
-    
-    with col2:
-        # Market performance heatmap
-        performance_metrics = geo_summary[['Conversion_Rate', 'Avg_Engagement', 'Avg_Deal_Size']].T
-        performance_metrics.columns = geo_summary['Country']
-        
-        # Normalize the data for better comparison
-        performance_normalized = performance_metrics.div(performance_metrics.max(axis=1), axis=0) * 100
-        
-        fig_heatmap = go.Figure(data=go.Heatmap(
-            z=performance_normalized.values,
-            x=performance_normalized.columns,
-            y=performance_normalized.index,
-            colorscale='RdYlGn',
-            showscale=True
-        ))
-        fig_heatmap.update_layout(
-            title="Market Performance Heatmap (Normalized)",
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(color='white')
-        )
-        st.plotly_chart(fig_heatmap, use_container_width=True)
-    
-    # Market Insights and Recommendations
-    st.subheader("🎯 Market Strategy Recommendations")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    # Identify top performing market
-    top_conversion_market = geo_summary.loc[geo_summary['Conversion_Rate'].idxmax()]
-    
-    with col1:
-        st.markdown(f"""
-        <div class="ai-recommendation">
-            <h4>🏆 Top Performer</h4>
-            <p><strong>{top_conversion_market['Country']}</strong></p>
-            <p>Conversion Rate: {top_conversion_market['Conversion_Rate']:.1%}</p>
-            <p>Strategy: Scale investment and replicate success factors</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Identify growth opportunity
-    growth_market = geo_summary.loc[geo_summary['Lead_Count'].idxmax()]
-    
-    with col2:
-        st.markdown(f"""
-        <div class="prediction-box">
-            <h4>📈 Growth Market</h4>
-            <p><strong>{growth_market['Country']}</strong></p>
-            <p>Lead Volume: {growth_market['Lead_Count']} leads</p>
-            <p>Strategy: Focus on conversion optimization</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Identify underperforming market
-    underperform_market = geo_summary.loc[geo_summary['Conversion_Rate'].idxmin()]
-    
-    with col3:
-        st.markdown(f"""
-        <div class="insight-card alert-medium">
-            <h4>⚠️ Needs Attention</h4>
-            <p><strong>{underperform_market['Country']}</strong></p>
-            <p>Conversion: {underperform_market['Conversion_Rate']:.1%}</p>
-            <p>Strategy: Review approach and training needs</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Detailed Market Performance Table
-    st.subheader("📋 Detailed Market Performance")
-    
-    # Format the data for display
-    display_summary = geo_summary.copy()
-    display_summary['Total_Pipeline'] = display_summary['Total_Pipeline'].apply(lambda x: f'${x:,.0f}')
-    display_summary['Avg_Deal_Size'] = display_summary['Avg_Deal_Size'].apply(lambda x: f'${x:,.0f}')
-    display_summary['Expected_Revenue'] = display_summary['Expected_Revenue'].apply(lambda x: f'${x:,.0f}')
-    display_summary['Conversion_Rate'] = display_summary['Conversion_Rate'].apply(lambda x: f'{x:.1%}')
-    display_summary['Avg_Engagement'] = display_summary['Avg_Engagement'].apply(lambda x: f'{x:.0f}')
-    
-    display_summary = display_summary.rename(columns={
-        'Lead_Count': 'Leads',
-        'Total_Pipeline': 'Pipeline Value',
-        'Avg_Deal_Size': 'Avg Deal Size',
-        'Conversion_Rate': 'Conversion Rate',
-        'Expected_Revenue': 'Expected Revenue',
-        'Avg_Engagement': 'Engagement Score'
-    })
-    
-    st.dataframe(display_summary, use_container_width=True)
+    c1, c2 = st.columns(2)
+
+    with c1:
+        if {'Conversion_Rate','Avg_Deal_Size'}.issubset(geo.columns):
+            fig = go.Figure()
+            fig.add_scatter(x=geo['Conversion_Rate'], y=geo['Avg_Deal_Size'], mode='markers+text', text=geo['Country'],
+                            textposition='top center',
+                            marker=dict(size=geo['Lead_Count']*3, color=geo.get('Expected_Revenue', geo.get('Total_Pipeline', 0)),
+                                        colorscale='Viridis', showscale=True, sizemode='diameter', sizeref=2, opacity=0.8))
+            fig.update_layout(title='Market Opportunity Matrix', xaxis_title='Conversion Rate', yaxis_title='Average Deal Size ($)',
+                              paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Need Conversion_Rate and Avg_Deal_Size to render the opportunity matrix.")
+
+    with c2:
+        # Heatmap with whichever metrics exist among these
+        metric_cols = [c for c in ['Conversion_Rate','Avg_Engagement','Avg_Deal_Size'] if c in geo.columns]
+        if len(metric_cols) >= 1:
+            perf = geo[metric_cols].T
+            perf.columns = geo['Country']
+            # Normalize by row max to 0-100
+            perf_norm = perf.div(perf.max(axis=1).replace(0, 1), axis=0) * 100
+            fig = go.Figure(data=go.Heatmap(z=perf_norm.values, x=perf_norm.columns, y=perf_norm.index, colorscale='RdYlGn', showscale=True))
+            fig.update_layout(title='Market Performance Heatmap (Normalized)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Insufficient metrics to render heatmap (need any of Conversion_Rate, Avg_Engagement, Avg_Deal_Size).")
 
 def create_advanced_ai_insights_dashboard(leads_df, calls_df, schedule_df, agent_perf_df):
     """Advanced AI/ML Insights Dashboard with predictive analytics"""
