@@ -1,4 +1,3 @@
-# app_enhanced.py
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -63,18 +62,15 @@ def metric_card(title, value, fmt="number"):
 
 # ---------------- GitHub/Upload Data Loading ----------------
 def read_csv_public(url: str) -> pd.DataFrame:
-    # Public GitHub raw URLs are directly readable by pandas over HTTPS
-    return pd.read_csv(url)  # pandas supports http/https read_csv directly [25]
+    return pd.read_csv(url)
 
 def read_csv_private(url: str, token: str) -> pd.DataFrame:
-    # For private repos, send a GitHub token as an Authorization header
     resp = requests.get(url, headers={"Authorization": f"token {token}"})
     resp.raise_for_status()
     return pd.read_csv(io.StringIO(resp.text))
 
 @st.cache_data(show_spinner=False)
 def load_from_github(raw_base: str, token: str | None, leads_name="leads_current.csv", calls_name="calls.csv", tasks_name="tasks_current.csv"):
-    # raw_base example: https://raw.githubusercontent.com/USER/REPO/BRANCH/data
     base = raw_base.rstrip("/")
     urls = {
         "leads": f"{base}/{leads_name}",
@@ -101,9 +97,7 @@ def load_from_upload():
     return pd.read_csv(f_leads), pd.read_csv(f_calls), pd.read_csv(f_tasks)
 
 def ensure_minimum_features(leads: pd.DataFrame, calls: pd.DataFrame) -> pd.DataFrame:
-    # Derive EngagementScore and RevenuePotential if missing
     leads2 = attach_engagement_and_values(leads, calls)
-    # LeadVelocity as days since CreatedOn if present
     if 'CreatedOn' in leads2.columns:
         leads2['CreatedOn'] = pd.to_datetime(leads2['CreatedOn'], errors='coerce')
         leads2['LeadVelocity'] = (pd.Timestamp.now().normalize() - leads2['CreatedOn']).dt.days.clip(lower=0)
@@ -111,15 +105,12 @@ def ensure_minimum_features(leads: pd.DataFrame, calls: pd.DataFrame) -> pd.Data
 
 def cold_start_propensity(leads: pd.DataFrame) -> pd.DataFrame:
     df = leads.copy()
-    # Normalize EngagementScore 0..1
     eng = pd.to_numeric(df.get('EngagementScore', 0), errors='coerce').fillna(0.0)
     eng_n = (eng - eng.min()) / (eng.max() - eng.min() + 1e-9)
-    stage_weight = df.get('LeadStageId', pd.Series(*len(df)))  # default mid-stage
+    stage_weight = df.get('LeadStageId', pd.Series(*len(df)))
     stage_map = {1:0.35, 2:0.55, 3:0.70, 4:0.90}
     sw = stage_weight.map(stage_map).fillna(0.5)
-    # Heuristic propensity blend
     df['PropensityToConvert'] = (0.6*eng_n + 0.4*sw).clip(0,1)
-    # Next Best Action via rule-based function
     acts = df.apply(next_best_action, axis=1, result_type='expand')
     df[['NBA_Action','NBA_Priority','NBA_Confidence','NBA_Reason']] = acts
     return df
@@ -153,58 +144,42 @@ def main():
     else:
         leads_df, calls_df, schedule_df = load_from_upload()
 
-    # Ensure required features for models or heuristics
     leads_df = ensure_minimum_features(leads_df, calls_df)
 
-    # Sidebar controls
     st.sidebar.header("🎛️ Controls")
     horizon = st.sidebar.slider("📈 Forecast Horizon (days)", 7, 60, 30)
     agents_slider = st.sidebar.slider("👥 Agents staffed", 5, 60, 15)
 
-    # Detect labels for training; otherwise cold-start heuristic
     has_lead_labels = 'Converted' in leads_df.columns and leads_df['Converted'].dropna().isin([0,1]).any()
     has_task_labels = 'IsBreach' in schedule_df.columns and schedule_df['IsBreach'].dropna().isin([0,1]).any()
 
     if has_lead_labels and has_task_labels:
-        lead_model, auc, sla_model = train_lead_model(leads_df, 'Converted'), None, None
-        # Calibrated classifier returns model + AUC in our earlier API; align here:
-        # Re-train using provided signature for consistency:
-        from modules.ml_leads import train_lead_model as train_lead_model_full
-        lead_model, auc = train_lead_model_full(leads_df, label_col='Converted')
-        from modules.ml_tasks import train_sla_model as train_sla_model_full
-        sla_model = train_sla_model_full(schedule_df, label_col='IsBreach')
-        # Inference
+        lead_model, auc = train_lead_model(leads_df, label_col='Converted')
+        sla_model = train_sla_model(schedule_df, label_col='IsBreach')
         scored = attach_nba(score_leads(lead_model, leads_df))
         tasks_scored = score_sla(sla_model, schedule_df)
     else:
         auc = float('nan')
         scored = cold_start_propensity(leads_df)
-        # Heuristic SLA risk if no labels/model
         t = schedule_df.copy()
-        # Derive DaysUntilDue if ScheduledDate exists
         if 'ScheduledDate' in t.columns:
             t['ScheduledDate'] = pd.to_datetime(t['ScheduledDate'], errors='coerce')
             t['DaysUntilDue'] = (t['ScheduledDate'] - pd.Timestamp.now()).dt.days
         days = pd.to_numeric(t.get('DaysUntilDue', 0), errors='coerce').fillna(0)
-        # Risk: overdue -> high; else decays with days
         risk = np.where(days < 0, 0.9, np.clip(0.6 - 0.02*days, 0.05, 0.8))
-        # If explicit Overdue/TaskStatusId==5 available, override to high risk
         if 'TaskStatusId' in t.columns:
             risk = np.where(t['TaskStatusId'] == 5, 0.95, risk)
         t['SLA_BreachRisk'] = risk
         t['SLA_RiskLevel'] = pd.cut(t['SLA_BreachRisk'], bins=[-0.01,0.33,0.66,1.0], labels=['Low','Medium','High'])
         tasks_scored = t
 
-    # Calls forecasting + optimal hours
     ds = daily_call_series(calls_df, date_col='CallDateTime')
     fc = forecast_calls(ds, periods=horizon)
     best_hours = optimal_call_windows(calls_df)
 
-    # Conversion KPIs and Geo priority
     conv_kpi, top10 = propensity_weighted_pipeline(scored)
     geo = market_priority(scored)
 
-    # Tabs
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "Executive Overview",
         "Lead Status",
@@ -261,11 +236,26 @@ def main():
     # -------- AI Call Activity --------
     with tab3:
         st.subheader(f"{horizon}-Day Call Forecast")
+
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=fc['date'], y=fc['forecast'], mode='lines', name='Forecast', line=dict(color='#3b82f6', width=3)))
-        fig.add_trace(go.Scatter(x=fc['date'], y=fc['lo'], mode='lines', name='Lo', line=dict(color='rgba(59,130,246,0.3)', dash='dash')))
-        fig.add_trace(go.Scatter(x=fc['date'], y=fc['hi'], mode='lines', name='Hi', line=dict(color='rgba(59,130,246,0.3)', dash='dash'), fill='tonexty', fillcolor='rgba(59,130,246,0.08)')))
-        fig.update_layout(title="Forecast with Uncertainty Bands", paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+        fig.add_trace(go.Scatter(
+            x=fc['date'], y=fc['forecast'], mode='lines', name='Forecast',
+            line=dict(color='#3b82f6', width=3)
+        ))
+        fig.add_trace(go.Scatter(
+            x=fc['date'], y=fc['lo'], mode='lines', name='Lo',
+            line=dict(color='rgba(59,130,246,0.3)', dash='dash')
+        ))
+        fig.add_trace(go.Scatter(
+            x=fc['date'], y=fc['hi'], mode='lines', name='Hi',
+            line=dict(color='rgba(59,130,246,0.3)', dash='dash'),
+            fill='tonexty', fillcolor='rgba(59,130,246,0.08)'
+        ))
+        fig.update_layout(
+            title="Forecast with Uncertainty Bands",
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='white')
+        )
         st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("Optimal Call Windows (by Success Rate)")
@@ -332,7 +322,6 @@ def main():
         with c3: st.markdown(metric_card("Tasks Scored", float(len(tasks_scored))), unsafe_allow_html=True)
         with c4: st.markdown(metric_card("Leads Scored", float(len(scored))), unsafe_allow_html=True)
 
-    # Footer
     st.markdown("---")
     f1, f2, f3 = st.columns(3)
     with f1: st.markdown("**🔄 Last Updated:** just now")
