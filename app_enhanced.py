@@ -1,16 +1,18 @@
+# app_enhanced.py
 import warnings
 warnings.filterwarnings('ignore')
 
 import os
+import io
+import requests
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-# ML/Forecasting modules (place these under modules/ as provided)
-from modules.etl_sql import load_crm_tables
+# ML/Forecasting modules (ensure modules/ folder is in your repo as provided earlier)
 from modules.features import attach_engagement_and_values
-from modules.ml_leads import train_lead_model, score_leads, attach_nba
+from modules.ml_leads import train_lead_model, score_leads, attach_nba, next_best_action
 from modules.ml_calls import daily_call_series, forecast_calls, optimal_call_windows
 from modules.ml_tasks import train_sla_model, score_sla
 from modules.ml_agents import availability_heatmap
@@ -43,7 +45,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- Helpers ----------------
 def metric_card(title, value, fmt="number"):
     if fmt == "currency" and isinstance(value, (int, float)):
         display_value = f"${value:,.0f}"
@@ -60,37 +61,68 @@ def metric_card(title, value, fmt="number"):
     </div>
     """
 
-@st.cache_data(show_spinner=False)
-def load_data(conn_str: str):
-    d = load_crm_tables(conn_str)
-    leads = attach_engagement_and_values(d['leads'], d['calls'])
-    # LeadVelocity: days since CreatedOn (for cycle-time signals)
-    if 'CreatedOn' in leads.columns:
-        leads['CreatedOn'] = pd.to_datetime(leads['CreatedOn'], errors='coerce')
-        leads['LeadVelocity'] = (pd.Timestamp.now().normalize() - leads['CreatedOn']).dt.days.clip(lower=0)
-    return leads, d['calls'], d['tasks']
+# ---------------- GitHub/Upload Data Loading ----------------
+def read_csv_public(url: str) -> pd.DataFrame:
+    # Public GitHub raw URLs are directly readable by pandas over HTTPS
+    return pd.read_csv(url)  # pandas supports http/https read_csv directly [25]
 
-@st.cache_resource(show_spinner=False)
-def train_models(leads_labeled: pd.DataFrame, tasks_labeled: pd.DataFrame):
-    lead_model, auc = train_lead_model(leads_labeled, label_col='Converted')
-    sla_model = train_sla_model(tasks_labeled, label_col='IsBreach')
-    return lead_model, auc, sla_model
+def read_csv_private(url: str, token: str) -> pd.DataFrame:
+    # For private repos, send a GitHub token as an Authorization header
+    resp = requests.get(url, headers={"Authorization": f"token {token}"})
+    resp.raise_for_status()
+    return pd.read_csv(io.StringIO(resp.text))
 
 @st.cache_data(show_spinner=False)
-def infer_all(lead_model, sla_model, leads_current, calls_current, tasks_current):
-    # Lead scoring + NBA
-    scored = attach_nba(score_leads(lead_model, leads_current))
-    # Calls forecasting + optimal hours
-    ds = daily_call_series(calls_current, date_col='CallDateTime')
-    fc = forecast_calls(ds, periods=30)
-    best_hours = optimal_call_windows(calls_current)
-    # SLA breach risk
-    tasks_scored = score_sla(sla_model, tasks_current)
-    # Conversion KPIs
-    conv_kpi, top10 = propensity_weighted_pipeline(scored)
-    # Geo priority
-    geo = market_priority(scored)
-    return scored, fc, best_hours, tasks_scored, conv_kpi, top10, geo
+def load_from_github(raw_base: str, token: str | None, leads_name="leads_current.csv", calls_name="calls.csv", tasks_name="tasks_current.csv"):
+    # raw_base example: https://raw.githubusercontent.com/USER/REPO/BRANCH/data
+    base = raw_base.rstrip("/")
+    urls = {
+        "leads": f"{base}/{leads_name}",
+        "calls": f"{base}/{calls_name}",
+        "tasks": f"{base}/{tasks_name}"
+    }
+    reader = (lambda u: read_csv_private(u, token)) if token else read_csv_public
+    leads = reader(urls["leads"])
+    calls = reader(urls["calls"])
+    tasks = reader(urls["tasks"])
+    return leads, calls, tasks
+
+def load_from_upload():
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        f_leads = st.file_uploader("Upload leads CSV", type=["csv"], key="leads_up")
+    with c2:
+        f_calls = st.file_uploader("Upload calls CSV", type=["csv"], key="calls_up")
+    with c3:
+        f_tasks = st.file_uploader("Upload tasks CSV", type=["csv"], key="tasks_up")
+    if not (f_leads and f_calls and f_tasks):
+        st.info("Please upload all three CSVs (leads, calls, tasks).")
+        st.stop()
+    return pd.read_csv(f_leads), pd.read_csv(f_calls), pd.read_csv(f_tasks)
+
+def ensure_minimum_features(leads: pd.DataFrame, calls: pd.DataFrame) -> pd.DataFrame:
+    # Derive EngagementScore and RevenuePotential if missing
+    leads2 = attach_engagement_and_values(leads, calls)
+    # LeadVelocity as days since CreatedOn if present
+    if 'CreatedOn' in leads2.columns:
+        leads2['CreatedOn'] = pd.to_datetime(leads2['CreatedOn'], errors='coerce')
+        leads2['LeadVelocity'] = (pd.Timestamp.now().normalize() - leads2['CreatedOn']).dt.days.clip(lower=0)
+    return leads2
+
+def cold_start_propensity(leads: pd.DataFrame) -> pd.DataFrame:
+    df = leads.copy()
+    # Normalize EngagementScore 0..1
+    eng = pd.to_numeric(df.get('EngagementScore', 0), errors='coerce').fillna(0.0)
+    eng_n = (eng - eng.min()) / (eng.max() - eng.min() + 1e-9)
+    stage_weight = df.get('LeadStageId', pd.Series(*len(df)))  # default mid-stage
+    stage_map = {1:0.35, 2:0.55, 3:0.70, 4:0.90}
+    sw = stage_weight.map(stage_map).fillna(0.5)
+    # Heuristic propensity blend
+    df['PropensityToConvert'] = (0.6*eng_n + 0.4*sw).clip(0,1)
+    # Next Best Action via rule-based function
+    acts = df.apply(next_best_action, axis=1, result_type='expand')
+    df[['NBA_Action','NBA_Priority','NBA_Confidence','NBA_Reason']] = acts
+    return df
 
 # ---------------- Main ----------------
 def main():
@@ -101,24 +133,76 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # Sidebar
+    st.sidebar.header("📦 Data source")
+    src = st.sidebar.radio("Choose how to load data", ["GitHub (raw URLs)", "Upload CSVs"], index=0)
+
+    if src == "GitHub (raw URLs)":
+        st.sidebar.caption("Use raw.githubusercontent.com links via a base path; files must be public or provide a token for private repos.")
+        raw_base = st.sidebar.text_input(
+            "Raw base URL",
+            placeholder="https://raw.githubusercontent.com/USER/REPO/BRANCH/data"
+        )
+        leads_name = st.sidebar.text_input("Leads file name", value="leads_current.csv")
+        calls_name = st.sidebar.text_input("Calls file name", value="calls.csv")
+        tasks_name = st.sidebar.text_input("Tasks file name", value="tasks_current.csv")
+        gh_token = st.secrets.get("github", {}).get("token", os.getenv("GITHUB_TOKEN", "")) or None
+        if not raw_base:
+            st.info("Enter the Raw base URL to load CSVs from GitHub.")
+            st.stop()
+        leads_df, calls_df, schedule_df = load_from_github(raw_base, gh_token, leads_name, calls_name, tasks_name)
+    else:
+        leads_df, calls_df, schedule_df = load_from_upload()
+
+    # Ensure required features for models or heuristics
+    leads_df = ensure_minimum_features(leads_df, calls_df)
+
+    # Sidebar controls
     st.sidebar.header("🎛️ Controls")
-    conn_str = st.secrets.get("mssql", {}).get("conn_str", os.getenv("MSSQL_CONN_STR", ""))
-    if not conn_str:
-        st.sidebar.warning("No SQL connection string found in secrets. Set .streamlit/secrets.toml or MSSQL_CONN_STR.")
     horizon = st.sidebar.slider("📈 Forecast Horizon (days)", 7, 60, 30)
     agents_slider = st.sidebar.slider("👥 Agents staffed", 5, 60, 15)
 
-    # Load, train, infer
-    leads_df, calls_df, schedule_df = load_data(conn_str) if conn_str else (pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
-    if leads_df.empty or calls_df.empty or schedule_df.empty:
-        st.error("Required tables not loaded. Check SQL connection and table names.")
-        st.stop()
+    # Detect labels for training; otherwise cold-start heuristic
+    has_lead_labels = 'Converted' in leads_df.columns and leads_df['Converted'].dropna().isin([0,1]).any()
+    has_task_labels = 'IsBreach' in schedule_df.columns and schedule_df['IsBreach'].dropna().isin([0,1]).any()
 
-    lead_model, auc, sla_model = train_models(leads_df, schedule_df)
-    scored, fc, best_hours, tasks_scored, conv_kpi, top10, geo = infer_all(
-        lead_model, sla_model, leads_df, calls_df, schedule_df
-    )
+    if has_lead_labels and has_task_labels:
+        lead_model, auc, sla_model = train_lead_model(leads_df, 'Converted'), None, None
+        # Calibrated classifier returns model + AUC in our earlier API; align here:
+        # Re-train using provided signature for consistency:
+        from modules.ml_leads import train_lead_model as train_lead_model_full
+        lead_model, auc = train_lead_model_full(leads_df, label_col='Converted')
+        from modules.ml_tasks import train_sla_model as train_sla_model_full
+        sla_model = train_sla_model_full(schedule_df, label_col='IsBreach')
+        # Inference
+        scored = attach_nba(score_leads(lead_model, leads_df))
+        tasks_scored = score_sla(sla_model, schedule_df)
+    else:
+        auc = float('nan')
+        scored = cold_start_propensity(leads_df)
+        # Heuristic SLA risk if no labels/model
+        t = schedule_df.copy()
+        # Derive DaysUntilDue if ScheduledDate exists
+        if 'ScheduledDate' in t.columns:
+            t['ScheduledDate'] = pd.to_datetime(t['ScheduledDate'], errors='coerce')
+            t['DaysUntilDue'] = (t['ScheduledDate'] - pd.Timestamp.now()).dt.days
+        days = pd.to_numeric(t.get('DaysUntilDue', 0), errors='coerce').fillna(0)
+        # Risk: overdue -> high; else decays with days
+        risk = np.where(days < 0, 0.9, np.clip(0.6 - 0.02*days, 0.05, 0.8))
+        # If explicit Overdue/TaskStatusId==5 available, override to high risk
+        if 'TaskStatusId' in t.columns:
+            risk = np.where(t['TaskStatusId'] == 5, 0.95, risk)
+        t['SLA_BreachRisk'] = risk
+        t['SLA_RiskLevel'] = pd.cut(t['SLA_BreachRisk'], bins=[-0.01,0.33,0.66,1.0], labels=['Low','Medium','High'])
+        tasks_scored = t
+
+    # Calls forecasting + optimal hours
+    ds = daily_call_series(calls_df, date_col='CallDateTime')
+    fc = forecast_calls(ds, periods=horizon)
+    best_hours = optimal_call_windows(calls_df)
+
+    # Conversion KPIs and Geo priority
+    conv_kpi, top10 = propensity_weighted_pipeline(scored)
+    geo = market_priority(scored)
 
     # Tabs
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
@@ -136,7 +220,7 @@ def main():
     with tab1:
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            st.markdown(metric_card("Lead Model AUC", float(auc), "number"), unsafe_allow_html=True)
+            st.markdown(metric_card("Lead Model AUC", float(auc) if auc == auc else 0.0), unsafe_allow_html=True)
         with c2:
             total_pipeline = float(pd.to_numeric(scored.get('RevenuePotential', 0), errors='coerce').sum())
             st.markdown(metric_card("Pipeline Value", total_pipeline, "currency"), unsafe_allow_html=True)
@@ -155,7 +239,6 @@ def main():
     # -------- Lead Status --------
     with tab2:
         st.subheader("Lead Status Breakdown (Pie)")
-        # Prefer LeadStatus if available, else map LeadStage
         if 'StatusName_E' in scored.columns:
             status_counts = scored['StatusName_E'].fillna('Unknown').value_counts()
             fig = go.Figure(data=[go.Pie(labels=status_counts.index, values=status_counts.values, hole=0.35)])
@@ -178,13 +261,10 @@ def main():
     # -------- AI Call Activity --------
     with tab3:
         st.subheader(f"{horizon}-Day Call Forecast")
-        # Recompute to chosen horizon quickly
-        ds = daily_call_series(calls_df, date_col='CallDateTime')
-        fc_h = forecast_calls(ds, periods=horizon)
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=fc_h['date'], y=fc_h['forecast'], mode='lines', name='Forecast', line=dict(color='#3b82f6', width=3)))
-        fig.add_trace(go.Scatter(x=fc_h['date'], y=fc_h['lo'], mode='lines', name='Lo', line=dict(color='rgba(59,130,246,0.3)', dash='dash')))
-        fig.add_trace(go.Scatter(x=fc_h['date'], y=fc_h['hi'], mode='lines', name='Hi', line=dict(color='rgba(59,130,246,0.3)', dash='dash'), fill='tonexty', fillcolor='rgba(59,130,246,0.08)'))
+        fig.add_trace(go.Scatter(x=fc['date'], y=fc['forecast'], mode='lines', name='Forecast', line=dict(color='#3b82f6', width=3)))
+        fig.add_trace(go.Scatter(x=fc['date'], y=fc['lo'], mode='lines', name='Lo', line=dict(color='rgba(59,130,246,0.3)', dash='dash')))
+        fig.add_trace(go.Scatter(x=fc['date'], y=fc['hi'], mode='lines', name='Hi', line=dict(color='rgba(59,130,246,0.3)', dash='dash'), fill='tonexty', fillcolor='rgba(59,130,246,0.08)')))
         fig.update_layout(title="Forecast with Uncertainty Bands", paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
         st.plotly_chart(fig, use_container_width=True)
 
@@ -221,9 +301,7 @@ def main():
     # -------- Conversion --------
     with tab6:
         st.subheader("Conversion Overview")
-        # Converted vs Dropped (based on StatusName_E)
         if 'StatusName_E' in scored.columns:
-            closed = scored['StatusName_E'].str.upper().isin(['WON','LOST'])
             conv = (scored['StatusName_E'].str.upper() == 'WON').sum()
             drop = (scored['StatusName_E'].str.upper() == 'LOST').sum()
             fig = go.Figure(data=[go.Bar(x=['Converted','Dropped'], y=[conv, drop], marker_color=['#10b981','#ef4444'])])
@@ -242,7 +320,6 @@ def main():
     # -------- Geographic --------
     with tab7:
         st.subheader("Market Priority Ranking")
-        # If you have a Country lookup, join here to display names; using CountryId as per schema for now
         show_cols = [c for c in ['CountryId','PriorityScore','exp_rev','mean_prop','mean_rev','leads'] if c in geo.columns]
         st.dataframe(geo[show_cols].head(15), use_container_width=True)
 
@@ -250,7 +327,7 @@ def main():
     with tab8:
         st.subheader("AI System Health & Insights")
         c1, c2, c3, c4 = st.columns(4)
-        with c1: st.markdown(metric_card("Lead Model AUC", float(auc)), unsafe_allow_html=True)
+        with c1: st.markdown(metric_card("Lead Model AUC", float(auc) if auc == auc else 0.0), unsafe_allow_html=True)
         with c2: st.markdown(metric_card("Forecast Days", float(len(fc))), unsafe_allow_html=True)
         with c3: st.markdown(metric_card("Tasks Scored", float(len(tasks_scored))), unsafe_allow_html=True)
         with c4: st.markdown(metric_card("Leads Scored", float(len(scored))), unsafe_allow_html=True)
