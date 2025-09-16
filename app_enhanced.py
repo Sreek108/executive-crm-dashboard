@@ -614,8 +614,8 @@ def create_enhanced_lead_status_dashboard(leads_df):
     st.dataframe(
         act_df.head(15).style.format({'Confidence': '{:.0%}', 'Revenue': '${:,.0f}', 'Buy': '{:.0%}', 'Churn': '{:.0%}', 'Upgrade': '{:.0%}'}),
         use_container_width=True, height=420
-
     )
+
 
 def create_enhanced_call_activity_dashboard(calls_df):
     """Enhanced AI Call Activity Dashboard with pattern analysis"""
