@@ -100,16 +100,24 @@ def ensure_minimum_features(leads: pd.DataFrame, calls: pd.DataFrame) -> pd.Data
 
 def cold_start_propensity(leads: pd.DataFrame) -> pd.DataFrame:
     df = leads.copy()
-    eng = pd.to_numeric(df.get('EngagementScore', 0), errors='coerce').fillna(0.0)  # numeric safe [13]
-    eng_n = (eng - eng.min()) / (eng.max() - eng.min() + 1e-9)  # 0..1 normalize [13]
-    stage_weight = df.get('LeadStageId', pd.Series(*len(df)))
-    stage_map = {1:0.35, 2:0.55, 3:0.70, 4:0.90}
-    sw = stage_weight.map(stage_map).fillna(0.5)  # heuristic stage prior [13]
-    df['PropensityToConvert'] = (0.6*eng_n + 0.4*sw).clip(0,1)  # blend [13]
-    acts = df.apply(next_best_action, axis=1, result_type='expand')  # NBA rules [13]
-    df[['NBA_Action','NBA_Priority','NBA_Confidence','NBA_Reason']] = acts  # attach [13]
-    return df  # scored leads [13]
+    # 0..1 normalize engagement
+    eng = pd.to_numeric(df.get('EngagementScore', 0), errors='coerce').fillna(0.0)
+    eng_n = (eng - eng.min()) / (eng.max() - eng.min() + 1e-9)
 
+    # SAFE fallback: Series of stage=2, aligned to df.index (was: pd.Series(*len(df)) -> TypeError)
+    stage_weight = df.get('LeadStageId', pd.Series( * len(df), index=df.index))
+
+    stage_map = {1: 0.35, 2: 0.55, 3: 0.70, 4: 0.90}
+    sw = stage_weight.map(stage_map).fillna(0.5)
+
+    # Heuristic propensity
+    df['PropensityToConvert'] = (0.6 * eng_n + 0.4 * sw).clip(0, 1)
+
+    # Rule‑based NBA
+    from modules.ml_leads import next_best_action
+    acts = df.apply(next_best_action, axis=1, result_type='expand')
+    df[['NBA_Action', 'NBA_Priority', 'NBA_Confidence', 'NBA_Reason']] = acts
+    return df
 # ---------------- Main ----------------
 def main():
     st.markdown("""
