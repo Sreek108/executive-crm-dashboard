@@ -453,7 +453,7 @@ def create_enhanced_lead_status_dashboard(leads_df):
     # ===== 🎯 AI-Recommended Next Best Actions =====
     st.markdown('### 🎯 AI-Recommended Next Best Actions')
 
-    name_series = leads_df.get('FullName', pd.Series([f'Lead {i+1}']*len(idx), index=idx))
+    name_series = leads_df.get('FullName', pd.Series([f'Lead {j+1}' for j in range(len(idx))], index=idx, dtype='object'))
     company_series = leads_df.get('Company', aligned_series(leads_df, '-'))
     country_series = leads_df.get('Country', aligned_series(leads_df, '-'))
 
