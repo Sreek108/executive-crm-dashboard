@@ -361,26 +361,18 @@ def create_enhanced_executive_summary(leads_df, calls_df, schedule_df, agent_per
             st.plotly_chart(fig_radar, use_container_width=True)
 
 def create_enhanced_lead_status_dashboard(leads_df):
-    """Enhanced Lead Status Dashboard with advanced segmentation"""
-    st.subheader("📊 Advanced Lead Analytics")
-    
+    """Enhanced Lead Status Dashboard with advanced segmentation and always-on insights (robust to missing columns)."""
+    st.subheader("📊 Lead Analytics")
+
+    # --- Lead Stage Funnel & Segmentation ---
     col1, col2 = st.columns(2)
-    
+
     with col1:
-        # Lead Stage Funnel with Conversion Rates
+        # Lead Stage Funnel with Conversion Rates (safe guard)
         stage_mapping = {1: 'New', 2: 'Qualified', 3: 'Nurtured', 4: 'Converted'}
         if 'LeadStageId' in leads_df.columns:
-            stage_counts = leads_df['LeadStageId'].value_counts().sort_index()
+            stage_counts = leads_df['LeadStageId'].value_counts(dropna=False).sort_index()
             stage_labels = [stage_mapping.get(i, f'Stage {i}') for i in stage_counts.index]
-            
-            # Calculate conversion rates between stages
-            conversion_rates = []
-            for i in range(len(stage_counts) - 1):
-                if i == 0:
-                    conversion_rates.append(100)
-                else:
-                    conversion_rates.append((stage_counts.iloc[i] / stage_counts.iloc[i-1]) * 100)
-            
             fig_funnel = go.Figure(go.Funnel(
                 y=stage_labels,
                 x=stage_counts.values,
@@ -395,45 +387,43 @@ def create_enhanced_lead_status_dashboard(leads_df):
                 font=dict(color='white', size=12)
             )
             st.plotly_chart(fig_funnel, use_container_width=True)
-    
+        else:
+            st.info("LeadStageId column not found; funnel chart skipped.")
+
     with col2:
-        # Behavioral Segmentation
+        # Behavioral Segmentation (safe guard)
         if 'BehavioralSegment' in leads_df.columns:
-            segment_counts = leads_df['BehavioralSegment'].value_counts()
-            
-            colors = {'Champions': '#10b981', 'Loyal Customers': '#3b82f6', 
-                     'Potential Loyalists': '#f59e0b', 'At Risk': '#ef4444', 
-                     'Need Attention': '#8b5cf6'}
-            
+            segment_counts = leads_df['BehavioralSegment'].value_counts(dropna=False)
+            colors = {'Champions': '#10b981', 'Loyal Customers': '#3b82f6',
+                      'Potential Loyalists': '#f59e0b', 'At Risk': '#ef4444',
+                      'Need Attention': '#8b5cf6'}
             fig_segments = go.Figure(data=[go.Pie(
-                labels=segment_counts.index,
+                labels=segment_counts.index.astype(str),
                 values=segment_counts.values,
                 hole=0.4,
-                marker_colors=[colors.get(segment, '#6b7280') for segment in segment_counts.index],
-                textinfo='label+percent',
-                textfont_size=11
+                marker_colors=[colors.get(seg, '#6b7280') for seg in segment_counts.index]
             )])
             fig_segments.update_layout(
                 title="Customer Behavioral Segmentation",
                 paper_bgcolor='rgba(0,0,0,0)',
                 plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white', size=12),
-                showlegend=True
+                font=dict(color='white', size=12)
             )
             st.plotly_chart(fig_segments, use_container_width=True)
-    
-    # Lead Temperature and Engagement Analysis
+        else:
+            st.info("BehavioralSegment column not found; segmentation chart skipped.")
+
+    # --- Lead Temperature and Engagement ---
     st.subheader("🌡️ Lead Temperature & Engagement Analysis")
-    
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
         if 'TemperatureTrend' in leads_df.columns:
-            temp_counts = leads_df['TemperatureTrend'].value_counts()
+            temp_counts = leads_df['TemperatureTrend'].value_counts(dropna=False)
             fig_temp = go.Figure(data=[go.Bar(
-                x=temp_counts.index,
+                x=temp_counts.index.astype(str),
                 y=temp_counts.values,
-                marker_color=['#10b981', '#f59e0b', '#ef4444']
+                marker_color=['#10b981', '#f59e0b', '#ef4444', '#6b7280']
             )])
             fig_temp.update_layout(
                 title="Lead Temperature Trends",
@@ -442,15 +432,14 @@ def create_enhanced_lead_status_dashboard(leads_df):
                 font=dict(color='white')
             )
             st.plotly_chart(fig_temp, use_container_width=True)
-    
+        else:
+            st.info("TemperatureTrend column not found; temperature chart skipped.")
+
     with col2:
         if 'EngagementScore' in leads_df.columns:
             fig_engagement = go.Figure()
             fig_engagement.add_trace(go.Histogram(
-                x=leads_df['EngagementScore'],
-                nbinsx=10,
-                marker_color='#8b5cf6',
-                opacity=0.8
+                x=leads_df['EngagementScore'], nbinsx=10, marker_color='#8b5cf6', opacity=0.8
             ))
             fig_engagement.update_layout(
                 title="Engagement Score Distribution",
@@ -461,27 +450,24 @@ def create_enhanced_lead_status_dashboard(leads_df):
                 font=dict(color='white')
             )
             st.plotly_chart(fig_engagement, use_container_width=True)
-    
+        else:
+            st.info("EngagementScore column not found; distribution chart skipped.")
+
     with col3:
         if 'LeadVelocity' in leads_df.columns:
-            avg_velocity = leads_df['LeadVelocity'].mean()
+            avg_velocity = pd.to_numeric(leads_df['LeadVelocity'], errors='coerce').mean()
             fig_velocity = go.Figure(go.Indicator(
-                mode="gauge+number+delta",
-                value=avg_velocity,
+                mode="gauge+number",
+                value=float(avg_velocity) if not np.isnan(avg_velocity) else 0.0,
                 title={'text': "Average Lead Velocity (Days)"},
-                delta={'reference': 20},
                 gauge={
-                    'axis': {'range': [None, 50]},
+                    'axis': {'range': [0, 50]},
                     'bar': {'color': "#f59e0b"},
                     'steps': [
                         {'range': [0, 15], 'color': "#10b981"},
                         {'range': [15, 30], 'color': "#f59e0b"},
                         {'range': [30, 50], 'color': "#ef4444"}
-                    ],
-                    'threshold': {
-                        'line': {'color': "white", 'width': 4},
-                        'thickness': 0.75, 'value': 25
-                    }
+                    ]
                 }
             ))
             fig_velocity.update_layout(
@@ -489,80 +475,64 @@ def create_enhanced_lead_status_dashboard(leads_df):
                 font={'color': "white", 'family': "Arial"}
             )
             st.plotly_chart(fig_velocity, use_container_width=True)
-    
-    # Propensity Models Dashboard
-    st.subheader("🎯 AI Propensity Models")
-    
-    if all(col in leads_df.columns for col in ['PropensityToBuy', 'PropensityToChurn', 'PropensityToUpgrade']):
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            buy_propensity = leads_df['PropensityToBuy'].mean()
-            high_buy_propensity = len(leads_df[leads_df['PropensityToBuy'] > 0.7])
-            st.markdown(f"""
-            <div class="performance-card">
-                <h4>💰 Propensity to Buy</h4>
-                <h2 style="color: #10b981;">{buy_propensity:.1%}</h2>
-                <p>{high_buy_propensity} leads with high buy propensity</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            churn_risk = leads_df['PropensityToChurn'].mean()
-            high_churn_risk = len(leads_df[leads_df['PropensityToChurn'] > 0.7])
-            st.markdown(f"""
-            <div class="performance-card">
-                <h4>⚠️ Churn Risk</h4>
-                <h2 style="color: #ef4444;">{churn_risk:.1%}</h2>
-                <p>{high_churn_risk} leads at high churn risk</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            upgrade_propensity = leads_df['PropensityToUpgrade'].mean()
-            high_upgrade = len(leads_df[leads_df['PropensityToUpgrade'] > 0.6])
-            st.markdown(f"""
-            <div class="performance-card">
-                <h4>📈 Upgrade Potential</h4>
-                <h2 style="color: #3b82f6;">{upgrade_propensity:.1%}</h2>
-                <p>{high_upgrade} leads likely to upgrade</p>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    # Next Best Actions
-    st.subheader("🎯 AI-Recommended Next Best Actions")
-    
-    if 'NextBestAction' in leads_df.columns:
-        action_counts = leads_df['NextBestAction'].value_counts()
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            fig_actions = go.Figure(data=[go.Bar(
-                y=action_counts.index,
-                x=action_counts.values,
-                orientation='h',
-                marker_color='#f59e0b'
-            )])
-            fig_actions.update_layout(
-                title="Recommended Actions Distribution",
-                xaxis_title="Number of Leads",
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='white')
-            )
-            st.plotly_chart(fig_actions, use_container_width=True)
-        
-        with col2:
-            st.markdown("**🤖 AI Action Priorities:**")
-            for i, (action, count) in enumerate(action_counts.head(5).items()):
-                priority_color = "#ef4444" if i < 2 else "#f59e0b" if i < 4 else "#10b981"
-                st.markdown(f"""
-                <div style="background: {priority_color}20; padding: 10px; margin: 5px 0; border-radius: 5px; border-left: 3px solid {priority_color};">
-                    <strong>{action}</strong><br>
-                    <small>{count} leads • Priority: {'High' if i < 2 else 'Medium' if i < 4 else 'Low'}</small>
-                </div>
-                """, unsafe_allow_html=True)
+        else:
+            st.info("LeadVelocity column not found; gauge skipped.")
+
+    # ===== Enhanced Intelligence Section (always-on, safe to missing columns) =====
+    st.markdown("---")
+    st.subheader("🧭 Lead Intelligence Add-ons")
+
+    # Length-aligned, numeric-safe series
+    idx = leads_df.index
+    eng = pd.to_numeric(leads_df.get('EngagementScore', pd.Series([np.nan]*len(idx), index=idx)), errors='coerce')
+    conv = pd.to_numeric(leads_df.get('ConversionProbability', pd.Series([np.nan]*len(idx), index=idx)), errors='coerce')
+    rev  = pd.to_numeric(
+        leads_df.get('ExpectedRevenue', leads_df.get('RevenuePotential', pd.Series(*len(idx), index=idx))),
+        errors='coerce'
+    ).fillna(0)
+
+    # KPI strip
+    k1,k2,k3,k4 = st.columns(4)
+    with k1:
+        med_eng = float(np.nanmedian(eng)) if len(eng)>0 else 0.0
+        st.markdown(create_metric_card("Median Engagement", med_eng, 0.0), unsafe_allow_html=True)
+    with k2:
+        avg_conv = float(np.nanmean(conv)*100) if len(conv)>0 else 0.0
+        st.markdown(create_metric_card("Avg Conv Prob", avg_conv, 0.0, "percentage"), unsafe_allow_html=True)
+    with k3:
+        st.markdown(create_metric_card("Total Expected", float(rev.sum()), 0.0, "currency"), unsafe_allow_html=True)
+    with k4:
+        hot_ready = int(((conv>0.70) & (rev>0)).sum())
+        st.markdown(create_metric_card("Hot Opportunities", hot_ready), unsafe_allow_html=True)
+
+    # Composite Lead Quality score and Top 10 table
+    quality = (0.6*conv.fillna(0.0) + 0.4*(eng.fillna(0.0)/100.0)).clip(0,1)
+    table = pd.DataFrame({
+        'Lead': leads_df.get('FullName', pd.Series([f'Lead {i+1}' for i in range(len(idx))], index=idx)),
+        'Company': leads_df.get('Company', pd.Series(['-']*len(idx), index=idx)),
+        'Country': leads_df.get('Country', pd.Series(['-']*len(idx), index=idx)),
+        'QualityScore': quality.round(3),
+        'ConvProb': conv.fillna(0.0).round(3),
+        'Revenue': rev
+    })
+    top = table.sort_values(["QualityScore","Revenue"], ascending=[False,False]).head(10)
+
+    st.markdown("**Top 10 Opportunities**")
+    st.dataframe(
+        top.style.format({'QualityScore': '{:.2f}', 'ConvProb': '{:.1%}', 'Revenue': '${:,.0f}'}),
+        use_container_width=True, height=360
+    )
+
+    # Quick insights bullets
+    hot = int((conv>0.7).sum())
+    cooling = int((leads_df.get('TemperatureTrend', pd.Series(['Unknown']*len(idx), index=idx))== 'Cooling Down').sum())
+    champions = int((leads_df.get('BehavioralSegment', pd.Series(['-']*len(idx), index=idx))=='Champions').sum())
+
+    st.markdown("- ✅ Focus first on leads with QualityScore ≥ 0.75 for fastest wins.")
+    st.markdown(f"- 🚩 {hot} high-probability leads detected; schedule demos within 48 hours.")
+    st.markdown(f"- 🧊 {cooling} cooling leads require retention play; trigger nurturing workflow.")
+    st.markdown(f"- 🏆 {champions} champions segment shows strong upsell potential this month.")
+
 
 def create_enhanced_call_activity_dashboard(calls_df):
     """Enhanced AI Call Activity Dashboard with pattern analysis"""
