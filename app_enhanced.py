@@ -653,4 +653,4 @@ def main():
     st.sidebar.markdown("## 📊 Export Options")
     if st.sidebar.button("📑 Generate Executive Report"):
         st.sidebar.success("Report generated! Check downloads.")
-    if st.sidebar.button("📈
+    if st.sidebar.button("📈)
