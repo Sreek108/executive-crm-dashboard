@@ -9,13 +9,24 @@ import plotly.graph_objects as go
 from datetime import datetime
 
 # ------------------------------------------------------------
-# Page config
+# Page config (fixed unterminated string)
 # ------------------------------------------------------------
 st.set_page_config(
-    page_title="CRM Dashboard,
+    page_title="Executive CRM Dashboard - Advanced Analytics",
+    page_icon="🚀",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------
+def aligned_series(df, value=0, dtype=None):
+    """
+    Create a Series of a constant value aligned to df.index.
+    Prevents TypeErrors from shape mismatch in .get(...) fallbacks.
+    """
+    return pd.Series([value] * len(df), index=df.index, dtype=dtype)
 
 # ------------------------------------------------------------
 # Executive CSS
@@ -25,6 +36,7 @@ st.markdown(
     <style>
         .main { background-color: #0f1419; color: #ffffff; }
         .stApp { background: linear-gradient(135deg, #0f1419 0%, #1a202c 100%); }
+
         .metric-container {
             background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
             padding: 20px; border-radius: 12px; border: 1px solid #4a5568;
@@ -98,6 +110,7 @@ def create_fallback_data():
     Create fallback sample data if files are not found.
     """
     st.warning("Enhanced data files not found. Using sample data for demonstration.")
+
     n_leads = 50
     n_calls = 80
     n_tasks = 30
@@ -119,9 +132,8 @@ def create_fallback_data():
         "EngagementScore": rng.integers(20, 100, n_leads),
         "BehavioralSegment": rng.choice(["Champions", "At Risk", "Need Attention", "Loyal Customers"], n_leads),
         "ChurnRisk": rng.uniform(0.1, 0.9, n_leads).round(3),
-        "CreatedOn": pd.date_range(start_date, periods=n_leads, freq="D")
+        "CreatedOn": pd.date_range(start_date, periods=n_leads, freq="D"),
     })
-    # Lead velocity (days since created) as a demo metric
     leads_df["LeadVelocity"] = (pd.Timestamp.now().normalize() - leads_df["CreatedOn"]).dt.days.clip(lower=0)
 
     calls_df = pd.DataFrame({
@@ -132,7 +144,7 @@ def create_fallback_data():
         "CallHour": [d.hour for d in pd.date_range(start_date, periods=n_calls, freq="H")],
         "CallPattern": rng.choice(["Cold", "Warm", "Follow-up", "Demo"], n_calls),
         "Sentiment": rng.choice(["Positive", "Neutral", "Negative"], n_calls, p=[0.52, 0.32, 0.16]),
-        "CallOutcome": rng.choice(["No Answer", "Callback", "Meeting Booked", "Closed Won", "Closed Lost"], n_calls)
+        "CallOutcome": rng.choice(["No Answer", "Callback", "Meeting Booked", "Closed Won", "Closed Lost"], n_calls),
     })
 
     schedule_df = pd.DataFrame({
@@ -142,7 +154,7 @@ def create_fallback_data():
         "SLAStatus": rng.choice(["On Track", "At Risk", "Breach"], n_tasks, p=[0.6, 0.25, 0.15]),
         "EstimatedEffortHours": rng.uniform(1, 8, n_tasks).round(1),
         "ActualEffortHours": rng.uniform(0.5, 10, n_tasks).round(1),
-        "ScheduledDate": pd.date_range(start_date, periods=n_tasks, freq="2D")
+        "ScheduledDate": pd.date_range(start_date, periods=n_tasks, freq="2D"),
     })
     schedule_df["DaysUntilDue"] = (schedule_df["ScheduledDate"] - pd.Timestamp.now()).dt.days
 
@@ -158,7 +170,7 @@ def create_fallback_data():
         "SatisfactionScore": rng.uniform(6.5, 9.6, n_agents).round(1),
         "TaskCompletionRate": rng.uniform(0.6, 0.95, n_agents).round(3),
         "EfficiencyScore": rng.uniform(0.6, 0.95, n_agents).round(3),
-        "Role": ["Manager", "Senior", "Senior", "Junior", "Junior"]
+        "Role": ["Manager", "Senior", "Senior", "Junior", "Junior"],
     })
 
     return leads_df, calls_df, schedule_df, agent_perf_df
@@ -168,17 +180,11 @@ def create_fallback_data():
 # ------------------------------------------------------------
 def create_metric_card(title, value, change=None, format_type="number"):
     if format_type == "currency":
-        if isinstance(value, (int, float)):
-            display_value = f"${value:,.0f}"
-        else:
-            display_value = str(value)
+        display_value = f"${float(value):,.0f}" if isinstance(value, (int, float)) else str(value)
     elif format_type == "percentage":
         display_value = f"{float(value):.1f}%" if isinstance(value, (int, float)) else str(value)
     else:
-        if isinstance(value, (int, float)):
-            display_value = f"{value:,.0f}" if value >= 1000 else f"{value:.1f}"
-        else:
-            display_value = str(value)
+        display_value = f"{value:,.0f}" if isinstance(value, (int, float)) and value >= 1000 else f"{float(value):.1f}" if isinstance(value, (int, float)) else str(value)
 
     change_html = ""
     if change is not None and isinstance(change, (int, float)):
@@ -195,7 +201,7 @@ def create_metric_card(title, value, change=None, format_type="number"):
     """
 
 # ------------------------------------------------------------
-# Executive Overview
+# Executive Overview (fixed aligned fallbacks)
 # ------------------------------------------------------------
 def create_enhanced_executive_summary(leads_df, calls_df, schedule_df, agent_perf_df):
     st.markdown(
@@ -210,7 +216,6 @@ def create_enhanced_executive_summary(leads_df, calls_df, schedule_df, agent_per
 
     col1, col2, col3, col4, col5 = st.columns(5)
 
-    # Col 1: Leads
     with col1:
         total_leads = len(leads_df)
         lead_scoring = pd.to_numeric(leads_df.get("LeadScoringId", aligned_series(leads_df, 0)), errors="coerce").fillna(0)
@@ -218,21 +223,18 @@ def create_enhanced_executive_summary(leads_df, calls_df, schedule_df, agent_per
         st.markdown(create_metric_card("Total Leads", total_leads, 15.2), unsafe_allow_html=True)
         st.caption(f"🔥 {hot_leads} Hot Leads")
 
-    # Col 2: Pipeline/Expected
     with col2:
         revenue_potential = pd.to_numeric(leads_df.get("RevenuePotential", aligned_series(leads_df, 0.0)), errors="coerce").fillna(0.0)
         expected_revenue = pd.to_numeric(leads_df.get("ExpectedRevenue", leads_df.get("RevenuePotential", aligned_series(leads_df, 0.0))), errors="coerce").fillna(0.0)
         st.markdown(create_metric_card("Pipeline Value", float(revenue_potential.sum()), 8.7, "currency"), unsafe_allow_html=True)
         st.caption(f"💰 ${float(expected_revenue.sum()):,.0f} Expected")
 
-    # Col 3: Call success
     with col3:
-        is_success = pd.to_numeric(calls_df.get("IsSuccessful", aligned_series(calls_df, 0)), errors="coerce").fillna(0.0)
-        success_rate = float(is_success.mean() * 100) if len(is_success) else 0.0
+        success_series = calls_df.get("IsSuccessful", aligned_series(calls_df, 0)).astype(float)
+        success_rate = float(np.nanmean(success_series) * 100) if len(success_series) else 0.0
         st.markdown(create_metric_card("Call Success Rate", success_rate, -2.3, "percentage"), unsafe_allow_html=True)
         st.caption(f"📞 {len(calls_df)} Total Calls")
 
-    # Col 4: Engagement
     with col4:
         engagement = pd.to_numeric(leads_df.get("EngagementScore", aligned_series(leads_df, 0)), errors="coerce").fillna(0.0)
         avg_engagement = float(engagement.mean())
@@ -240,7 +242,6 @@ def create_enhanced_executive_summary(leads_df, calls_df, schedule_df, agent_per
         st.markdown(create_metric_card("Avg Engagement", avg_engagement, 5.1), unsafe_allow_html=True)
         st.caption(f"⭐ {high_engagement} High Engagement")
 
-    # Col 5: Conversion
     with col5:
         conv = pd.to_numeric(leads_df.get("ConversionProbability", aligned_series(leads_df, 0.0)), errors="coerce").fillna(0.0)
         conversion_rate = float(conv.mean() * 100)
@@ -249,16 +250,11 @@ def create_enhanced_executive_summary(leads_df, calls_df, schedule_df, agent_per
         st.caption(f"🎯 {predicted_conversions} Likely Converts")
 
 # ------------------------------------------------------------
-# Lead Intelligence
+# Lead Intelligence (robust + AI NBAs)
 # ------------------------------------------------------------
 def create_enhanced_lead_status_dashboard(leads_df):
-    """
-    Lead Status Dashboard with segmentation, temperature, KPIs, propensities, and next best actions.
-    Robust to missing columns and safe Series defaults.
-    """
     st.subheader("📊 Advanced Lead Analytics")
 
-    # Stage funnel and segments
     col1, col2 = st.columns(2)
     with col1:
         stage_mapping = {1: "New", 2: "Qualified", 3: "Nurtured", 4: "Converted"}
@@ -266,15 +262,11 @@ def create_enhanced_lead_status_dashboard(leads_df):
             stage_counts = leads_df["LeadStageId"].value_counts(dropna=False).sort_index()
             stage_labels = [stage_mapping.get(i, f"Stage {i}") for i in stage_counts.index]
             fig_funnel = go.Figure(go.Funnel(
-                y=stage_labels,
-                x=stage_counts.values,
-                textinfo="value+percent initial",
+                y=stage_labels, x=stage_counts.values, textinfo="value+percent initial",
                 marker_color=["#3b82f6", "#f59e0b", "#10b981", "#ef4444"],
             ))
-            fig_funnel.update_layout(
-                title="Lead Conversion Funnel with Drop-off Analysis",
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="white")
-            )
+            fig_funnel.update_layout(title="Lead Conversion Funnel with Drop-off Analysis",
+                                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
             st.plotly_chart(fig_funnel, use_container_width=True)
         else:
             st.info("LeadStageId column not found; funnel chart skipped.")
@@ -283,31 +275,25 @@ def create_enhanced_lead_status_dashboard(leads_df):
         if "BehavioralSegment" in leads_df.columns:
             segment_counts = leads_df["BehavioralSegment"].value_counts(dropna=False)
             colors = {"Champions": "#10b981", "Loyal Customers": "#3b82f6", "Potential Loyalists": "#f59e0b", "At Risk": "#ef4444", "Need Attention": "#8b5cf6"}
-            fig_segments = go.Figure(data=[go.Pie(
-                labels=segment_counts.index.astype(str),
-                values=segment_counts.values,
-                hole=0.4,
-                marker_colors=[colors.get(seg, "#6b7280") for seg in segment_counts.index],
-            )])
-            fig_segments.update_layout(
-                title="Customer Behavioral Segmentation", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="white")
-            )
+            fig_segments = go.Figure(data=[go.Pie(labels=segment_counts.index.astype(str),
+                                                  values=segment_counts.values, hole=0.4,
+                                                  marker_colors=[colors.get(seg, "#6b7280") for seg in segment_counts.index])])
+            fig_segments.update_layout(title="Customer Behavioral Segmentation",
+                                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
             st.plotly_chart(fig_segments, use_container_width=True)
         else:
             st.info("BehavioralSegment column not found; segmentation chart skipped.")
 
-    # Temperature & Engagement
     st.subheader("🌡️ Lead Temperature & Engagement Analysis")
     col1, col2, col3 = st.columns(3)
 
     with col1:
         if "TemperatureTrend" in leads_df.columns:
             temp_counts = leads_df["TemperatureTrend"].value_counts(dropna=False)
-            fig_temp = go.Figure(data=[go.Bar(
-                x=temp_counts.index.astype(str), y=temp_counts.values,
-                marker_color=["#10b981", "#f59e0b", "#ef4444", "#6b7280"],
-            )])
-            fig_temp.update_layout(title="Lead Temperature Trends", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
+            fig_temp = go.Figure(data=[go.Bar(x=temp_counts.index.astype(str), y=temp_counts.values,
+                                              marker_color=["#10b981", "#f59e0b", "#ef4444", "#6b7280"])])
+            fig_temp.update_layout(title="Lead Temperature Trends", paper_bgcolor="rgba(0,0,0,0)",
+                                   plot_bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
             st.plotly_chart(fig_temp, use_container_width=True)
         else:
             st.info("TemperatureTrend column not found; temperature chart skipped.")
@@ -315,13 +301,10 @@ def create_enhanced_lead_status_dashboard(leads_df):
     with col2:
         if "EngagementScore" in leads_df.columns:
             fig_engagement = go.Figure()
-            fig_engagement.add_trace(go.Histogram(
-                x=leads_df["EngagementScore"], nbinsx=10, marker_color="#8b5cf6", opacity=0.8
-            ))
-            fig_engagement.update_layout(
-                title="Engagement Score Distribution", xaxis_title="Engagement Score", yaxis_title="Number of Leads",
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="white"),
-            )
+            fig_engagement.add_trace(go.Histogram(x=leads_df["EngagementScore"], nbinsx=10, marker_color="#8b5cf6", opacity=0.8))
+            fig_engagement.update_layout(title="Engagement Score Distribution", xaxis_title="Engagement Score",
+                                         yaxis_title="Number of Leads", paper_bgcolor="rgba(0,0,0,0)",
+                                         plot_bgcolor="rgba(0,0,0,0)", font=dict(color="white"))
             st.plotly_chart(fig_engagement, use_container_width=True)
         else:
             st.info("EngagementScore column not found; distribution chart skipped.")
@@ -329,14 +312,14 @@ def create_enhanced_lead_status_dashboard(leads_df):
     with col3:
         if "LeadVelocity" in leads_df.columns:
             avg_velocity = pd.to_numeric(leads_df["LeadVelocity"], errors="coerce").mean()
-            fig_velocity = go.Figure(go.Indicator(
-                mode="gauge+number", value=float(avg_velocity) if not np.isnan(avg_velocity) else 0.0,
-                title={"text": "Average Lead Velocity (Days)"},
-                gauge={"axis": {"range": [0, 50]}, "bar": {"color": "#f59e0b"},
-                       "steps": [{"range": [0, 15], "color": "#10b981"},
-                                 {"range": [15, 30], "color": "#f59e0b"},
-                                 {"range": [30, 50], "color": "#ef4444"}]}
-            ))
+            fig_velocity = go.Figure(go.Indicator(mode="gauge+number",
+                                                  value=float(avg_velocity) if not np.isnan(avg_velocity) else 0.0,
+                                                  title={"text": "Average Lead Velocity (Days)"},
+                                                  gauge={"axis": {"range": [0, 50]},
+                                                         "bar": {"color": "#f59e0b"},
+                                                         "steps": [{"range": [0, 15], "color": "#10b981"},
+                                                                   {"range": [15, 30], "color": "#f59e0b"},
+                                                                   {"range": [30, 50], "color": "#ef4444"}]}))
             fig_velocity.update_layout(paper_bgcolor="rgba(0,0,0,0)", font={"color": "white", "family": "Arial"})
             st.plotly_chart(fig_velocity, use_container_width=True)
         else:
@@ -347,12 +330,9 @@ def create_enhanced_lead_status_dashboard(leads_df):
     st.subheader("🧭 Lead Intelligence Add-ons")
 
     idx = leads_df.index
-    eng = pd.to_numeric(leads_df.get("EngagementScore", pd.Series([np.nan]*len(idx), index=idx)), errors="coerce")
-    conv = pd.to_numeric(leads_df.get("ConversionProbability", pd.Series([np.nan]*len(idx), index=idx)), errors="coerce")
-    rev  = pd.to_numeric(
-        leads_df.get("ExpectedRevenue", leads_df.get("RevenuePotential", pd.Series(*len(idx), index=idx))),
-        errors="coerce"
-    ).fillna(0)
+    eng = pd.to_numeric(leads_df.get("EngagementScore", aligned_series(leads_df, np.nan)), errors="coerce")
+    conv = pd.to_numeric(leads_df.get("ConversionProbability", aligned_series(leads_df, np.nan)), errors="coerce")
+    rev  = pd.to_numeric(leads_df.get("ExpectedRevenue", leads_df.get("RevenuePotential", aligned_series(leads_df, 0.0))), errors="coerce").fillna(0.0)
 
     k1, k2, k3, k4 = st.columns(4)
     with k1:
@@ -374,7 +354,7 @@ def create_enhanced_lead_status_dashboard(leads_df):
         "Country": leads_df.get("Country", pd.Series(["-"]*len(idx), index=idx)),
         "QualityScore": quality.round(3),
         "ConvProb": conv.fillna(0.0).round(3),
-        "Revenue": rev
+        "Revenue": rev,
     })
     top = table.sort_values(["QualityScore", "Revenue"], ascending=[False, False]).head(10)
 
@@ -471,23 +451,24 @@ def create_enhanced_lead_status_dashboard(leads_df):
     )
 
 # ------------------------------------------------------------
-# Call Analytics (condensed, safe)
+# Call Analytics (safe)
 # ------------------------------------------------------------
 def create_enhanced_call_activity_dashboard(calls_df):
     st.subheader("🤖 Advanced Call Analytics & AI Insights")
 
     col1, col2, col3, col4 = st.columns(4)
+    total_calls = len(calls_df)
     with col1:
-        total_calls = len(calls_df)
         st.markdown(create_metric_card("Total Calls", total_calls, 23.1), unsafe_allow_html=True)
     with col2:
-        successful_calls = int(pd.to_numeric(calls_df.get("IsSuccessful", pd.Series(*len(calls_df), index=calls_df.index)), errors="coerce").sum())
-        success_rate = (successful_calls / total_calls * 100) if total_calls else 0
+        success_mask = calls_df.get("IsSuccessful", aligned_series(calls_df, False)).astype(bool)
+        successful_calls = int(success_mask.sum())
+        success_rate = (successful_calls / total_calls * 100) if total_calls else 0.0
         st.markdown(create_metric_card("Success Rate", success_rate, -5.2, "percentage"), unsafe_allow_html=True)
     with col3:
         if total_calls and "DurationSeconds" in calls_df.columns:
-            avg_duration = float(pd.to_numeric(calls_df.get("DurationSeconds"), errors="coerce")[calls_df.get("IsSuccessful", False) == True].mean() / 60)
-            st.markdown(create_metric_card("Avg Duration", avg_duration, 8.7), unsafe_allow_html=True)
+            avg_duration_min = float(pd.to_numeric(calls_df["DurationSeconds"], errors="coerce")[success_mask].mean() / 60.0)
+            st.markdown(create_metric_card("Avg Duration", avg_duration_min, 8.7), unsafe_allow_html=True)
             st.caption("Minutes")
     with col4:
         if "CallEfficiency" in calls_df.columns:
@@ -543,21 +524,17 @@ def create_enhanced_agent_dashboard(agent_perf_df, schedule_df):
             st.markdown(create_metric_card("Conversion Rate", float(agent_perf_df["ConversionRate"].mean()*100), 12.8, "percentage"), unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# Conversion / Revenue Intelligence
+# Conversion / Revenue Intelligence (safe fallbacks)
 # ------------------------------------------------------------
 def create_enhanced_conversion_dashboard(leads_df):
     st.subheader("💼 Advanced Conversion & Revenue Intelligence")
 
     total_leads = len(leads_df)
-    # SAFE default for stage series
-    stage_series = pd.to_numeric(
-        leads_df.get("LeadStageId", pd.Series(*total_leads, index=leads_df.index)),
-        errors="coerce"
-    )
+    stage_series = pd.to_numeric(leads_df.get("LeadStageId", aligned_series(leads_df, 0)), errors="coerce")
     converted_leads = int((stage_series == 4).sum())
 
-    rev_series = pd.to_numeric(leads_df.get("RevenuePotential", pd.Series([0.0]*total_leads, index=leads_df.index)), errors="coerce")
-    exp_series = pd.to_numeric(leads_df.get("ExpectedRevenue", pd.Series([0.0]*total_leads, index=leads_df.index)), errors="coerce")
+    rev_series = pd.to_numeric(leads_df.get("RevenuePotential", aligned_series(leads_df, 0.0)), errors="coerce")
+    exp_series = pd.to_numeric(leads_df.get("ExpectedRevenue", aligned_series(leads_df, 0.0)), errors="coerce")
 
     total_pipeline = float(rev_series.sum())
     expected_revenue = float(exp_series.sum())
@@ -646,21 +623,23 @@ def main():
 
     st.sidebar.markdown("## 🎛️ Advanced Analytics Filters")
 
-    date_options = {
-        "Last 7 days": 7, "Last 30 days": 30, "Last 90 days": 90, "Last 6 months": 180, "All time": None
-    }
+    date_options = {"Last 7 days": 7, "Last 30 days": 30, "Last 90 days": 90, "Last 6 months": 180, "All time": None}
     _ = st.sidebar.selectbox("📅 Select Time Period", list(date_options.keys()), index=1)
 
     if len(agent_perf_df) > 0:
-        agent_options = ["All Agents"] + agent_perf_df.get("AgentName", ["Agent 1", "Agent 2"]).tolist()
-        _ = st.sidebar.multiselect("👥 Select Agents", agent_options, default=["All Agents"])
+        if "AgentName" in agent_perf_df.columns:
+            agent_list = ["All Agents"] + agent_perf_df["AgentName"].astype(str).tolist()
+        else:
+            agent_list = ["All Agents", "Agent 1", "Agent 2"]
+        _ = st.sidebar.multiselect("👥 Select Agents", agent_list, default=["All Agents"])
 
     if "Country" in leads_df.columns:
         country_options = ["All Markets"] + sorted(leads_df["Country"].dropna().unique().tolist())
         _ = st.sidebar.multiselect("🌍 Select Markets", country_options, default=["All Markets"])
 
     if "LeadScoringId" in leads_df.columns:
-        _ = st.sidebar.selectbox("🌡️ Lead Temperature Filter", ["All Temperatures", "HOT Leads Only", "WARM Leads Only", "COLD Leads Only", "HOT + WARM"])
+        _ = st.sidebar.selectbox("🌡️ Lead Temperature Filter",
+                                 ["All Temperatures", "HOT Leads Only", "WARM Leads Only", "COLD Leads Only", "HOT + WARM"])
 
     if "BehavioralSegment" in leads_df.columns:
         segment_options = ["All Segments"] + sorted(leads_df["BehavioralSegment"].dropna().unique().tolist())
@@ -674,45 +653,4 @@ def main():
     st.sidebar.markdown("## 📊 Export Options")
     if st.sidebar.button("📑 Generate Executive Report"):
         st.sidebar.success("Report generated! Check downloads.")
-    if st.sidebar.button("📈 Export Charts"):
-        st.sidebar.success("Charts exported as PNG files!")
-
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-        "Executive Overview",
-        "Lead Intelligence",
-        "Call Analytics",
-        "Task Management",
-        "Agent Performance",
-        "Revenue Intelligence",
-        "Market Analysis",
-        "AI Command Center",
-    ])
-
-    with tab1: create_enhanced_executive_summary(leads_df, calls_df, schedule_df, agent_perf_df)
-    with tab2: create_enhanced_lead_status_dashboard(leads_df)
-    with tab3: create_enhanced_call_activity_dashboard(calls_df)
-    with tab4: create_enhanced_task_dashboard(schedule_df)
-    with tab5: create_enhanced_agent_dashboard(agent_perf_df, schedule_df)
-    with tab6: create_enhanced_conversion_dashboard(leads_df)
-    with tab7: create_enhanced_geographic_dashboard(leads_df)
-    with tab8: create_advanced_ai_insights_dashboard(leads_df, calls_df, schedule_df, agent_perf_df)
-
-    st.markdown("---")
-    c1, c2, c3 = st.columns(3)
-    with c1: st.markdown("**🔄 Last Updated:** 2 minutes ago")
-    with c2: st.markdown("**📊 Data Status:** All systems operational")
-    with c3: st.markdown("**🤖 AI Models:** 4 active, 87% avg accuracy")
-
-    st.markdown(
-        """
-        <div style="text-align: center; padding: 20px; color: #6b7280; font-size: 0.9rem;
-                    background: linear-gradient(90deg, #1a202c 0%, #2d3748 100%); border-radius: 10px; margin-top: 20px;">
-            🚀 Executive CRM Dashboard | Real Estate Analytics | Powered by Advanced AI/ML Intelligence<br>
-            <small>© 2025 | Version 2.0 | Enhanced with Predictive Analytics</small>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-if __name__ == "__main__":
-    main()
+    if st.sidebar.button("📈
