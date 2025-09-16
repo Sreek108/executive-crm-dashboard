@@ -1146,24 +1146,28 @@ def create_enhanced_conversion_dashboard(leads_df):
     """Enhanced Conversion Dashboard with revenue attribution (safe to missing cols)"""
     st.subheader("💼 Advanced Conversion & Revenue Intelligence")
 
-    # Conversion Metrics Overview (safe gets)
+    # SAFE: handle missing 'LeadStageId' and align default to index
+    stage_series = (
+        leads_df['LeadStageId']
+        if 'LeadStageId' in leads_df.columns
+        else pd.Series( * len(leads_df), index=leads_df.index)
+    )
+    converted_leads = int((pd.to_numeric(stage_series, errors='coerce') == 4).sum())
     total_leads = len(leads_df)
-    converted_leads = int((leads_df.get('LeadStageId', pd.Series(*len(leads_df))) == 4).sum())
-    total_pipeline = float(leads_df.get('RevenuePotential', pd.Series(*len(leads_df))).sum())
-    expected_revenue = float(leads_df.get('ExpectedRevenue', pd.Series(*len(leads_df))).sum())
+    total_pipeline = float(leads_df.get('RevenuePotential', pd.Series( * len(leads_df), index=leads_df.index)).sum())
+    expected_revenue = float(leads_df.get('ExpectedRevenue', pd.Series( * len(leads_df), index=leads_df.index)).sum())
 
-    with st.container():
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            conversion_rate = (converted_leads / total_leads * 100) if total_leads > 0 else 0.0
-            st.markdown(create_metric_card("Conversion Rate", conversion_rate, 8.5, "percentage"), unsafe_allow_html=True)
-        with col2:
-            st.markdown(create_metric_card("Pipeline Value", total_pipeline, 15.2, "currency"), unsafe_allow_html=True)
-        with col3:
-            st.markdown(create_metric_card("Expected Revenue", expected_revenue, 12.8, "currency"), unsafe_allow_html=True)
-        with col4:
-            conversion_efficiency = (expected_revenue / total_pipeline * 100) if total_pipeline > 0 else 0.0
-            st.markdown(create_metric_card("Pipeline Efficiency", conversion_efficiency, 5.3, "percentage"), unsafe_allow_html=True)
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        conversion_rate = (converted_leads / total_leads * 100) if total_leads > 0 else 0.0
+        st.markdown(create_metric_card("Conversion Rate", conversion_rate, 8.5, "percentage"), unsafe_allow_html=True)
+    with col2:
+        st.markdown(create_metric_card("Pipeline Value", total_pipeline, 15.2, "currency"), unsafe_allow_html=True)
+    with col3:
+        st.markdown(create_metric_card("Expected Revenue", expected_revenue, 12.8, "currency"), unsafe_allow_html=True)
+    with col4:
+        conversion_efficiency = (expected_revenue / total_pipeline * 100) if total_pipeline > 0 else 0.0
+        st.markdown(create_metric_card("Pipeline Efficiency", conversion_efficiency, 5.3, "percentage"), unsafe_allow_html=True)
 
     # Revenue Analysis by Segments
     st.subheader("💰 Revenue Attribution Analysis")
