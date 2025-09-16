@@ -482,29 +482,26 @@ def create_enhanced_lead_status_dashboard(leads_df):
     st.markdown("---")
     st.subheader("🧭 Lead Intelligence Add-ons")
 
-    # Length-aligned, numeric-safe series
-    idx = leads_df.index
-eng = pd.to_numeric(leads_df.get('EngagementScore', pd.Series([np.nan]*len(idx), index=idx)), errors='coerce')
-conv = pd.to_numeric(leads_df.get('ConversionProbability', pd.Series([np.nan]*len(idx), index=idx)), errors='coerce')
-rev = pd.to_numeric(
+# Length-aligned, numeric-safe series
+     idx = leads_df.index
+     eng = pd.to_numeric(leads_df.get('EngagementScore', pd.Series([np.nan]*len(idx), index=idx)), errors='coerce')
+     conv = pd.to_numeric(leads_df.get('ConversionProbability', pd.Series([np.nan]*len(idx), index=idx)), errors='coerce')
+rev  = pd.to_numeric(
     leads_df.get('ExpectedRevenue', leads_df.get('RevenuePotential', pd.Series(*len(idx), index=idx))),
     errors='coerce'
 ).fillna(0)
 
-
-    # KPI strip
-    k1,k2,k3,k4 = st.columns(4)
-    with k1:
-        med_eng = float(np.nanmedian(eng)) if len(eng)>0 else 0.0
-        st.markdown(create_metric_card("Median Engagement", med_eng, 0.0), unsafe_allow_html=True)
-    with k2:
-        avg_conv = float(np.nanmean(conv)*100) if len(conv)>0 else 0.0
-        st.markdown(create_metric_card("Avg Conv Prob", avg_conv, 0.0, "percentage"), unsafe_allow_html=True)
-    with k3:
-        st.markdown(create_metric_card("Total Expected", float(rev.sum()), 0.0, "currency"), unsafe_allow_html=True)
-    with k4:
-        hot_ready = int(((conv>0.70) & (rev>0)).sum())
-        st.markdown(create_metric_card("Hot Opportunities", hot_ready), unsafe_allow_html=True)
+# KPI strip (exact 4-space indent inside the function)
+k1, k2, k3, k4 = st.columns(4)
+with k1:
+    st.markdown(create_metric_card("Median Engagement", float(np.nanmedian(eng)) if len(eng)>0 else 0.0, 0.0), unsafe_allow_html=True)
+with k2:
+    st.markdown(create_metric_card("Avg Conv Prob", float(np.nanmean(conv)*100) if len(conv)>0 else 0.0, 0.0, "percentage"), unsafe_allow_html=True)
+with k3:
+    st.markdown(create_metric_card("Total Expected", float(rev.sum()), 0.0, "currency"), unsafe_allow_html=True)
+with k4:
+    hot_ready = int(((conv>0.70) & (rev>0)).sum())
+    st.markdown(create_metric_card("Hot Opportunities", hot_ready), unsafe_allow_html=True)
 
     # Composite Lead Quality score and Top 10 table
     quality = (0.6*conv.fillna(0.0) + 0.4*(eng.fillna(0.0)/100.0)).clip(0,1)
