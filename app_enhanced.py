@@ -380,7 +380,7 @@ def create_enhanced_lead_status_dashboard(leads_df):
     # Composite Lead Quality score and Top 10 table
     quality = (0.6*conv.fillna(0.0) + 0.4*(eng.fillna(0.0)/100.0)).clip(0, 1)
     table = pd.DataFrame({
-        'Lead': leads_df.get('FullName', pd.Series([f'Lead {i+1}']*len(idx), index=idx)),
+        'Lead': leads_df.get('FullName', pd.Series([f'Lead {j+1}' for j in range(len(idx))], index=idx, dtype='object')),
         'Company': leads_df.get('Company', aligned_series(leads_df, '-')),
         'Country': leads_df.get('Country', aligned_series(leads_df, '-')),
         'QualityScore': quality.round(3),
