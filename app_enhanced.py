@@ -23,101 +23,43 @@ st.set_page_config(
 # Custom CSS for enhanced executive styling
 st.markdown("""
 <style>
-    .main {
-        background-color: #0f1419;
-        color: #ffffff;
-    }
-    
-    .stApp {
-        background: linear-gradient(135deg, #0f1419 0%, #1a202c 100%);
-    }
-    
+    .main { background-color: #0f1419; color: #ffffff; }
+    .stApp { background: linear-gradient(135deg, #0f1419 0%, #1a202c 100%); }
     .metric-container {
         background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
-        padding: 20px;
-        border-radius: 12px;
-        border: 1px solid #4a5568;
-        margin: 10px 0;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        padding: 20px; border-radius: 12px; border: 1px solid #4a5568;
+        margin: 10px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
         transition: transform 0.2s ease;
     }
-    
-    .metric-container:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
-    }
-    
-    .metric-value {
-        font-size: 2.8rem;
-        font-weight: bold;
-        color: #f59e0b;
-        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-    }
-    
-    .metric-label {
-        font-size: 0.9rem;
-        color: #a0aec0;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 5px;
-    }
-    
-    .metric-change {
-        font-size: 0.8rem;
-        font-weight: 600;
-        margin-top: 8px;
-    }
-    
-    .positive { color: #68d391; }
-    .negative { color: #fc8181; }
-    .neutral { color: #90cdf4; }
-    
+    .metric-container:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.5); }
+    .metric-value { font-size: 2.8rem; font-weight: bold; color: #f59e0b; text-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+    .metric-label { font-size: 0.9rem; color: #a0aec0; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 5px; }
+    .metric-change { font-size: 0.8rem; font-weight: 600; margin-top: 8px; }
+    .positive { color: #68d391; } .negative { color: #fc8181; } .neutral { color: #90cdf4; }
     .insight-card {
         background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 5px solid #f59e0b;
-        margin: 15px 0;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        padding: 20px; border-radius: 10px; border-left: 5px solid #f59e0b;
+        margin: 15px 0; box-shadow: 0 4px 8px rgba(0,0,0,0.3);
     }
-    
     .alert-high { border-left-color: #fc8181; background: linear-gradient(135deg, #4a1f1f 0%, #5a2d2d 100%); }
     .alert-medium { border-left-color: #f6ad55; background: linear-gradient(135deg, #4a3a1f 0%, #5a4a2d 100%); }
     .alert-low { border-left-color: #68d391; background: linear-gradient(135deg, #1f4a2d 0%, #2d5a3a 100%); }
-    
     .dashboard-header {
         background: linear-gradient(90deg, #1a202c 0%, #2d3748 100%);
-        padding: 25px;
-        border-radius: 12px;
-        margin-bottom: 30px;
-        border: 1px solid #4a5568;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        padding: 25px; border-radius: 12px; margin-bottom: 30px; border: 1px solid #4a5568;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.3);
     }
-    
     .performance-card {
         background: linear-gradient(135deg, #1e3a5f 0%, #2d4a6b 100%);
-        padding: 15px;
-        border-radius: 8px;
-        margin: 10px 0;
-        border: 1px solid #3b82f6;
+        padding: 15px; border-radius: 8px; margin: 10px 0; border: 1px solid #3b82f6;
     }
-    
     .prediction-box {
         background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
-        padding: 15px;
-        border-radius: 8px;
-        margin: 10px 0;
-        color: white;
-        border: 1px solid #60a5fa;
+        padding: 15px; border-radius: 8px; margin: 10px 0; color: white; border: 1px solid #60a5fa;
     }
-    
     .ai-recommendation {
         background: linear-gradient(135deg, #7c3aed 0%, #8b5cf6 100%);
-        padding: 15px;
-        border-radius: 8px;
-        margin: 10px 0;
-        color: white;
-        border: 1px solid #a78bfa;
+        padding: 15px; border-radius: 8px; margin: 10px 0; color: white; border: 1px solid #a78bfa;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -438,7 +380,7 @@ def create_enhanced_lead_status_dashboard(leads_df):
     # Composite Lead Quality score and Top 10 table
     quality = (0.6*conv.fillna(0.0) + 0.4*(eng.fillna(0.0)/100.0)).clip(0, 1)
     table = pd.DataFrame({
-        'Lead': leads_df.get('FullName', aligned_series(leads_df, 'Lead')),
+        'Lead': leads_df.get('FullName', pd.Series([f'Lead {i+1}']*len(idx), index=idx)),
         'Company': leads_df.get('Company', aligned_series(leads_df, '-')),
         'Country': leads_df.get('Country', aligned_series(leads_df, '-')),
         'QualityScore': quality.round(3),
@@ -470,9 +412,10 @@ def create_enhanced_lead_status_dashboard(leads_df):
     eng_norm = (eng.fillna(0) / 100).clip(0, 1)
     rev_norm = (rev / (rev.max() if rev.max() > 0 else 1)).clip(0, 1)
 
-    buy = pd.to_numeric(leads_df.get('PropensityToBuy', np.nan), errors='coerce')
-    churn = pd.to_numeric(leads_df.get('PropensityToChurn', np.nan), errors='coerce')
-    upgrade = pd.to_numeric(leads_df.get('PropensityToUpgrade', np.nan), errors='coerce')
+    # FIX: default to aligned Series to avoid scalar -> AttributeError on .fillna
+    buy = pd.to_numeric(leads_df.get('PropensityToBuy', aligned_series(leads_df, np.nan)), errors='coerce')
+    churn = pd.to_numeric(leads_df.get('PropensityToChurn', aligned_series(leads_df, np.nan)), errors='coerce')
+    upgrade = pd.to_numeric(leads_df.get('PropensityToUpgrade', aligned_series(leads_df, np.nan)), errors='coerce')
 
     buy = buy.fillna((0.55*conv.fillna(0) + 0.35*eng_norm + 0.10*rev_norm).clip(0, 1))
     cooling_flag = (leads_df.get('TemperatureTrend', aligned_series(leads_df, 'Unknown')) == 'Cooling Down').astype(int)
@@ -510,7 +453,7 @@ def create_enhanced_lead_status_dashboard(leads_df):
     # ===== 🎯 AI-Recommended Next Best Actions =====
     st.markdown('### 🎯 AI-Recommended Next Best Actions')
 
-    name_series = leads_df.get('FullName', aligned_series(leads_df, 'Lead'))
+    name_series = leads_df.get('FullName', pd.Series([f'Lead {i+1}']*len(idx), index=idx))
     company_series = leads_df.get('Company', aligned_series(leads_df, '-'))
     country_series = leads_df.get('Country', aligned_series(leads_df, '-'))
 
