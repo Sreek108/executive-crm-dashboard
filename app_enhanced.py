@@ -1,10 +1,9 @@
-# app_enhanced.py
+# app_enhanced.py (local CSV loader version; no external calls)
 import warnings
 warnings.filterwarnings('ignore')
 
 import os
-import io
-import requests
+from pathlib import Path
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -61,71 +60,54 @@ def metric_card(title, value, fmt="number"):
     </div>
     """
 
-# ---------------- Data loading: Local -> GitHub raw -> Upload ----------------
-DEFAULT_FILES = {
-    "leads": "leads_current.csv",
-    "calls": "calls.csv",
-    "tasks": "tasks_current.csv",
-}
-LOCAL_DIR = "data"
-
-def read_csv_public(url_or_path: str) -> pd.DataFrame:
-    # pandas.read_csv supports both local paths and HTTP(S) URLs including raw.githubusercontent.com
-    return pd.read_csv(url_or_path)  # reads file path or HTTPS directly [1]
-
-def read_csv_private(url: str, token: str) -> pd.DataFrame:
-    resp = requests.get(url, headers={"Authorization": f"token {token}"})
-    resp.raise_for_status()
-    return pd.read_csv(io.StringIO(resp.text))  # loads private raw via HTTPS into pandas [1]
-
+# ---------------- Local CSV Data Loading ----------------
 @st.cache_data(show_spinner=False)
-def load_local(local_dir: str, files: dict) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    leads_p = os.path.join(local_dir, files["leads"])
-    calls_p = os.path.join(local_dir, files["calls"])
-    tasks_p = os.path.join(local_dir, files["tasks"])
-    if os.path.exists(leads_p) and os.path.exists(calls_p) and os.path.exists(tasks_p):
-        return (read_csv_public(leads_p), read_csv_public(calls_p), read_csv_public(tasks_p))  # reads local CSVs [1]
-    raise FileNotFoundError("Local files not found")
+def load_from_repo(base_dir: str, leads_name="leads_current.csv", calls_name="calls.csv", tasks_name="tasks_current.csv"):
+    """
+    Load CSVs from the repository using relative paths with pandas.read_csv.
+    Example layout:
+      repo/
+        data/leads_current.csv
+        data/calls.csv
+        data/tasks_current.csv
+    """
+    base = Path(base_dir)
+    leads_path = base / leads_name
+    calls_path = base / calls_name
+    tasks_path = base / tasks_name
 
-@st.cache_data(show_spinner=False)
-def load_github_raw(raw_base: str, files: dict, token: str | None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    base = raw_base.rstrip("/")
-    urls = {
-        "leads": f"{base}/{files['leads']}",
-        "calls": f"{base}/{files['calls']}",
-        "tasks": f"{base}/{files['tasks']}",
-    }
-    reader = (lambda u: read_csv_private(u, token)) if token else read_csv_public
-    return (reader(urls["leads"]), reader(urls["calls"]), reader(urls["tasks"]))  # reads raw GitHub URLs with optional token [2][3]
+    if not leads_path.exists() or not calls_path.exists() or not tasks_path.exists():
+        missing = [str(p) for p in [leads_path, calls_path, tasks_path] if not p.exists()]
+        raise FileNotFoundError(f"Missing CSV file(s): {', '.join(missing)}")
 
-def load_upload():
-    c1, c2, c3 = st.columns(3)
-    with c1: f_leads = st.file_uploader("Upload leads CSV", type=["csv"], key="leads_up")
-    with c2: f_calls = st.file_uploader("Upload calls CSV", type=["csv"], key="calls_up")
-    with c3: f_tasks = st.file_uploader("Upload tasks CSV", type=["csv"], key="tasks_up")
-    if not (f_leads and f_calls and f_tasks):
-        st.info("Please upload all three CSVs (leads, calls, tasks) to continue.")  # streamlit file_uploader prompt [4]
-        st.stop()
-    return pd.read_csv(f_leads), pd.read_csv(f_calls), pd.read_csv(f_tasks)  # pandas reads uploaded file buffers [1]
+    leads = pd.read_csv(leads_path)
+    calls = pd.read_csv(calls_path)
+    tasks = pd.read_csv(tasks_path)
+    return leads, calls, tasks
 
 def ensure_minimum_features(leads: pd.DataFrame, calls: pd.DataFrame) -> pd.DataFrame:
+    # Derive EngagementScore and RevenuePotential if missing
     leads2 = attach_engagement_and_values(leads, calls)
+    # LeadVelocity as days since CreatedOn if present
     if 'CreatedOn' in leads2.columns:
         leads2['CreatedOn'] = pd.to_datetime(leads2['CreatedOn'], errors='coerce')
         leads2['LeadVelocity'] = (pd.Timestamp.now().normalize() - leads2['CreatedOn']).dt.days.clip(lower=0)
-    return leads2  # backfills Engagement and Velocity for scoring [1]
+    return leads2
 
 def cold_start_propensity(leads: pd.DataFrame) -> pd.DataFrame:
     df = leads.copy()
+    # Normalize EngagementScore 0..1
     eng = pd.to_numeric(df.get('EngagementScore', 0), errors='coerce').fillna(0.0)
     eng_n = (eng - eng.min()) / (eng.max() - eng.min() + 1e-9)
-    stage_weight = df.get('LeadStageId', pd.Series(*len(df)))
+    stage_weight = df.get('LeadStageId', pd.Series(*len(df)))  # default mid-stage
     stage_map = {1:0.35, 2:0.55, 3:0.70, 4:0.90}
     sw = stage_weight.map(stage_map).fillna(0.5)
+    # Heuristic propensity blend
     df['PropensityToConvert'] = (0.6*eng_n + 0.4*sw).clip(0,1)
+    # Next Best Action via rule-based function
     acts = df.apply(next_best_action, axis=1, result_type='expand')
     df[['NBA_Action','NBA_Priority','NBA_Confidence','NBA_Reason']] = acts
-    return df  # heuristic propensity + NBA if no labels to train a model [1]
+    return df
 
 # ---------------- Main ----------------
 def main():
@@ -136,50 +118,44 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # Data source resolution: Local -> GitHub raw -> Upload
-    data_secrets = st.secrets.get("data", {})
-    raw_base = data_secrets.get("raw_base", os.getenv("RAW_BASE", "")).strip()
-    gh_token = st.secrets.get("github", {}).get("token", os.getenv("GITHUB_TOKEN", "")).strip() or None
+    # Sidebar: local files only
+    st.sidebar.header("📦 Local dataset (repo files)")
+    base_dir = st.sidebar.text_input("Folder path (relative to app root)", value="data")
+    leads_name = st.sidebar.text_input("Leads file", value="leads_current.csv")
+    calls_name = st.sidebar.text_input("Calls file", value="calls.csv")
+    tasks_name = st.sidebar.text_input("Tasks file", value="tasks_current.csv")
 
-    source_used = ""
     try:
-        leads_df, calls_df, schedule_df = load_local(LOCAL_DIR, DEFAULT_FILES)
-        source_used = f"Local files in {LOCAL_DIR}/"
-    except Exception:
-        if raw_base:
-            try:
-                leads_df, calls_df, schedule_df = load_github_raw(raw_base, DEFAULT_FILES, gh_token)
-                source_used = f"GitHub raw base: {raw_base}"
-            except Exception:
-                leads_df, calls_df, schedule_df = load_upload()
-                source_used = "Uploaded CSVs"
-        else:
-            leads_df, calls_df, schedule_df = load_upload()
-            source_used = "Uploaded CSVs"
+        leads_df, calls_df, schedule_df = load_from_repo(base_dir, leads_name, calls_name, tasks_name)
+    except FileNotFoundError as e:
+        st.error(str(e))
+        st.stop()
 
-    st.caption(f"Data source: {source_used}")  # Shows which loader succeeded [2]
-
-    # Ensure minimal features for models/heuristics
+    # Ensure features
     leads_df = ensure_minimum_features(leads_df, calls_df)
 
-    # Controls
+    # Sidebar controls
     st.sidebar.header("🎛️ Controls")
     horizon = st.sidebar.slider("📈 Forecast Horizon (days)", 7, 60, 30)
     agents_slider = st.sidebar.slider("👥 Agents staffed", 5, 60, 15)
 
-    # Train models if labels present; else cold-start
+    # Labels detection
     has_lead_labels = 'Converted' in leads_df.columns and leads_df['Converted'].dropna().isin([0,1]).any()
     has_task_labels = 'IsBreach' in schedule_df.columns and schedule_df['IsBreach'].dropna().isin([0,1]).any()
 
     if has_lead_labels and has_task_labels:
+        # Train models on local CSV labels
         lead_model, auc = train_lead_model(leads_df, label_col='Converted')
         sla_model = train_sla_model(schedule_df, label_col='IsBreach')
+        # Inference
         scored = attach_nba(score_leads(lead_model, leads_df))
         tasks_scored = score_sla(sla_model, schedule_df)
     else:
+        # Cold start: heuristic scoring and risk
         auc = float('nan')
         scored = cold_start_propensity(leads_df)
         t = schedule_df.copy()
+        # Compute DaysUntilDue if ScheduledDate exists
         if 'ScheduledDate' in t.columns:
             t['ScheduledDate'] = pd.to_datetime(t['ScheduledDate'], errors='coerce')
             t['DaysUntilDue'] = (t['ScheduledDate'] - pd.Timestamp.now()).dt.days
@@ -257,6 +233,7 @@ def main():
     # -------- AI Call Activity --------
     with tab3:
         st.subheader(f"{horizon}-Day Call Forecast")
+
         fig = go.Figure()
         fig.add_trace(go.Scatter(
             x=fc['date'], y=fc['forecast'], mode='lines', name='Forecast',
@@ -342,6 +319,7 @@ def main():
         with c3: st.markdown(metric_card("Tasks Scored", float(len(tasks_scored))), unsafe_allow_html=True)
         with c4: st.markdown(metric_card("Leads Scored", float(len(scored))), unsafe_allow_html=True)
 
+    # Footer
     st.markdown("---")
     f1, f2, f3 = st.columns(3)
     with f1: st.markdown("**🔄 Last Updated:** just now")
